@@ -1,0 +1,14 @@
+[project]
+name = "legal-rag-agno"
+version = "0.1.0"
+description = "Two Agno agents for legal contract RAG: ingest writes knowledge, query searches it as a tool."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agno>=3.0.9",
+    "chromadb>=1.5.9",
+    "openai>=3.10.0",
+    "pypdf>=6.18.0",
+    "python-dotenv>=1.2.3",
+    "sqlalchemy>=2.0.52",
+]

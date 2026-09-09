@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+data/vectordb/
+data/*.db
+data/incoming/*.pdf
+data/incoming/*.PDF
+data/incoming/*.docx
+tmp/
+uv.lock
