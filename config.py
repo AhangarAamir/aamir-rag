@@ -32,5 +32,4 @@ def require_api_key() -> None:
         raise RuntimeError(
             "OPENAI_API_KEY is missing. Copy .env.example to .env and set the key."
         )
-    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-# 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
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY # 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
