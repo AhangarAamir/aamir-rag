@@ -23,11 +23,19 @@ def main() -> None:
         query_main()
         return
 
+    if mode in {"os", "serve", "agentos"}:
+        from agent_os import agent_os
+
+        agent_os.serve(app="agent_os:app", reload=True)
+        return
+
     print("Legal RAG (Agno)")
     print("  uv run python main.py ingest [message]")
     print("  uv run python main.py query [question]")
+    print("  uv run python main.py os")
     print("  uv run python ingest_cli.py")
     print("  uv run python query_cli.py")
+    print("  uv run python agent_os.py")
     sys.exit(1)
 
 

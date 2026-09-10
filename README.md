@@ -50,6 +50,20 @@ uv run python ingest_cli.py
 # query — knowledge is a tool, not preloaded context
 uv run python main.py query What is the participating interest of RIL?
 uv run python query_cli.py
+
+# AgentOS — both agents over HTTP (default http://localhost:7777)
+uv run python main.py os
+# or: uv run python agent_os.py
+```
+
+Open [os.agno.com](https://os.agno.com), connect to `http://localhost:7777`, and pick **Ingest Agent** (`ingest-agent`) or **Query Agent** (`query-agent`).
+
+```bash
+# example: run query agent via the AgentOS API
+curl -X POST http://localhost:7777/agents/query-agent/runs \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "message=What is the participating interest of RIL?" \
+  -d "stream=false"
 ```
 
 ## Config (`.env`)

@@ -26,6 +26,7 @@ from config import (
     VECTOR_DB_DIR,
     require_api_key,
 )
+from prompts import CHUNKING_INSTRUCTIONS
 
 _knowledge: Knowledge | None = None
 
@@ -39,12 +40,8 @@ def build_pdf_reader() -> PDFReader:
     else:
         strategy = AgenticChunking(
             model=OpenAIChat(id=OPENAI_MODEL),
-            custom_prompt=(
-                "Split at article, clause, annexure, schedule, and heading boundaries. "
-                "Keep a complete clause together, including proviso and exceptions. "
-                "Do not cut a sentence in half."
-            ),
-            max_chunk_size=3000,
+            custom_prompt=CHUNKING_INSTRUCTIONS,
+            max_chunk_size=4000,
         )
 
     return PDFReader(
