@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { getSessionRuns, listSessions, runQuery, runsToMessages } from "./api.js";
 import { getUserId, newSessionId } from "./storage.js";
 
@@ -34,6 +35,15 @@ function Activity({ tools }) {
   );
 }
 
+function normalizeMarkdown(text) {
+  if (!text) return text;
+  return text.replace(/((?:^|\n)(?:\|[^\n]+)+)/g, (block) => {
+    if (!/\|[\s:-]+\|/.test(block)) return block;
+    if (block.includes("\n|")) return block;
+    return block.replace(/\|\s+\|/g, "|\n|");
+  });
+}
+
 function MessageBubble({ message }) {
   return (
     <article className={`bubble ${message.role}`}>
@@ -52,7 +62,11 @@ function MessageBubble({ message }) {
         </>
       ) : (
         <div className="bubble-markdown">
-          {message.content ? <Markdown>{message.content}</Markdown> : message.streaming ? <span className="cursor">▍</span> : null}
+          {message.content ? (
+            <Markdown remarkPlugins={[remarkGfm]}>{normalizeMarkdown(message.content)}</Markdown>
+          ) : message.streaming ? (
+            <span className="cursor">▍</span>
+          ) : null}
         </div>
       )}
       {message.error && <p className="bubble-error">{message.error}</p>}

@@ -27,6 +27,43 @@ NUM_HISTORY_RUNS = int(os.getenv("NUM_HISTORY_RUNS", "5"))
 SESSIONS_DB_FILE = DATA_DIR / "sessions.db"
 
 
+def _quiet_openai_httpx_finalizers() -> None:
+    """OpenAI 3.x wraps httpx2. Client GC calls __del__ -> is_closed -> _state.
+
+    If the wrapper is already half-destroyed, _state is gone and Python prints
+    'Exception ignored'. Searches still succeed. Swallow that destructor noise.
+    """
+    try:
+        from openai._base_client import AsyncHttpxClientWrapper, SyncHttpxClientWrapper
+    except ImportError:
+        return
+
+    def _safe_sync_del(self) -> None:
+        try:
+            if getattr(self, "_state", None) is None or self.is_closed:
+                return
+            self.close()
+        except Exception:
+            pass
+
+    def _safe_async_del(self) -> None:
+        try:
+            if getattr(self, "_state", None) is None or self.is_closed:
+                return
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.aclose())
+        except Exception:
+            pass
+
+    SyncHttpxClientWrapper.__del__ = _safe_sync_del  # type: ignore[method-assign]
+    AsyncHttpxClientWrapper.__del__ = _safe_async_del  # type: ignore[method-assign]
+
+
+_quiet_openai_httpx_finalizers()
+
+
 def require_api_key() -> None:
     if not OPENAI_API_KEY:
         raise RuntimeError(

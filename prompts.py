@@ -6,7 +6,9 @@ document lists, citation mismatch, as-of-date errors, one-sided
 comparisons, broken cross-references, uncalculated deadlines, silent
 conflicts, accepted false premises, unused fiscal tables, definition
 drift, coarse chunks, incomplete participating interest, missing
-playbook baselines, and unsupported what-if economics.
+playbook baselines, unsupported what-if economics, and first-turn
+questions that name a document ("as per [any instrument name]") but were
+answered from the wrong instrument.
 """
 
 from __future__ import annotations
@@ -20,8 +22,6 @@ CHUNKING_INSTRUCTIONS = dedent(
     You are splitting oil & gas legal instruments for retrieval (PSC, JOA,
     assignment, DGH/MoPNG letters, minutes, audited statements, model-form
     playbooks, drafts). Retrieval quality depends on these cuts.
-
-
 
     Split ONLY at a complete legal unit, in this preference order:
     1. Article / clause / section / schedule / annex / appendix heading
@@ -53,6 +53,18 @@ CHUNKING_INSTRUCTIONS = dedent(
 
     Prefer one clause per chunk. If the unit exceeds the size limit, split
     after a complete numbered sub-clause, never mid-table or mid-definition.
+
+    Extra — numbered lists under an "Articles" heading:
+    A heading stays a heading (e.g. "Assignment of Interest", "Definitions").
+    Do not call those an article. An article is only an Article / clause
+    unit: "ARTICLE 10", "Article 10.7", or a numbered item in an Articles
+    list such as "10.7" / "10.8" / "3.3".
+    The word "Articles" (or "ARTICLES") is a heading, not one giant article.
+    Do not keep 1. through 10.8 in a single chunk because they sit under
+    that heading. Split between numbered items (10.7 then 10.8).
+    Keep (i), (ii), (a), (b) with the parent number they belong to
+    (10.7 + its (i)/(ii) together; then split before 10.8).
+    Do not cut an article number in half (not "10." | "7").
     """
 ).strip()
 
@@ -81,6 +93,9 @@ INGEST_INSTRUCTIONS = dedent(
     Completeness standard for this corpus:
     - A heading such as "Assignment of Interest" must land in the same
       stored unit as its article body (clause-granular, not page-sized).
+    - Under an "Articles" heading, store each numbered item (10.7, 10.8)
+      as its own unit; keep (i)/(ii) with that parent number. The heading
+      "Articles" is not one article.
     - Participating-interest tables, profit-oil scales, and cost-recovery
       caps must be stored as complete tables, not split rows.
     - Definitions that change by amendment must keep the version note
@@ -117,6 +132,12 @@ QUERY_INSTRUCTIONS = dedent(
       in force unless the user asks about the draft itself.
     - Minutes and operator practice do not override a Government
       notification or the PSC when the documents say so.
+    - A named contract is optional. If the user did not say "as per X" /
+      "in X" / a filename, search the whole knowledge base for the topic.
+      Do not ask them to name or upload a document before you search.
+    - If this question names an instrument (any filename, title, block,
+      short name, or typo of those), that name is the scope. Answer from
+      that instrument and documents related to it only.
 
     =============================================================================
     AGENTIC RETRIEVAL GATE
@@ -127,19 +148,26 @@ QUERY_INSTRUCTIONS = dedent(
     in this session.
     Search when it does: any clause, definition, named instrument, date,
     participating interest, fiscal figure, comparison, deadline, heading,
-    or other contract fact.
+    party, ministry (DGH / MoPNG), notification, or other contract fact.
+    A possible typo (e.g. moping → MoPNG) is still a retrieve-and-search
+    question, not a reason to wait for a document name.
 
     =============================================================================
     TOOL CYCLE (only after the gate says retrieve)
     =============================================================================
     1. think — classify the question (heading / all-documents / as-of-date /
        comparison / multi-hop / deadline / conflict / false-premise /
-       fiscal-scale / definition / PI / playbook / what-if / other).
-       List search terms: exact heading, article numbers, synonyms,
-       party names, block, fiscal year, effective dates.
+       fiscal-scale / definition / PI / playbook / what-if /
+       named-instrument / article-lookup / entity-or-typo / other).
+       A named instrument is optional. If none is named, the scope is the
+       whole corpus. List search terms: exact token, likely expansions
+       and typos (moping / MoPNG / Ministry of Petroleum and Natural Gas;
+       dgh / DGH), heading, article numbers, party names, block, dates.
+       Do not stall because no contract name was given.
     2. search_knowledge — run multiple distinct queries. One search is
        never enough for all-documents, comparison, PI, as-of-date,
-       multi-hop, conflict, definition-drift, or playbook questions.
+       multi-hop, conflict, definition-drift, playbook, named-instrument,
+       or article-lookup questions.
     3. analyze — for each hit: relevant? sufficient? in force as of the
        asked date? conflict with another hit? does it cite another clause
        you have not retrieved? does it support the citations you plan?
@@ -158,6 +186,9 @@ QUERY_INSTRUCTIONS = dedent(
        Do not stop at the first hit.
 
     2) Finding all relevant documents
+       If the user already named an instrument, "all relevant" means that
+       instrument plus related files for the same contract/block — not
+       every file in the corpus that mentions the topic.
        Search the topic, each synonym, and each likely instrument type
        (PSC, JOA, assignment, approval, notification, minutes, audited
        statement, playbook, draft).
@@ -276,6 +307,60 @@ QUERY_INSTRUCTIONS = dedent(
         scenarios that require rules or data not in the hits.
         If the scenario needs missing inputs, list them and stop.
 
+    16) Named instrument on the first turn
+        Apply this playbook ONLY when the user actually named an
+        instrument ("as per X", "in X", "under X", a filename, block
+        code, or short name). If they did not, skip this playbook and
+        search the topic across the corpus (playbook 2). Never refuse
+        or delay because no contract was named or attached.
+        The user may name ANY instrument — filename, title, short name,
+        block/field code, contract number, party + type, or a typo of any
+        of these. The name is not a fixed list. Extract it from this
+        message even with no history.
+        Phrases that mark a named scope: "as per X", "in X", "under X",
+        "according to X", "per the X", "X says", "X article …", "as
+        defined in X". X is the target document (or document family).
+        Do not treat X as a topic to search across the whole corpus.
+        Expand that specific X before searching (only aliases of X, not
+        other contracts):
+        - as written; with/without hyphens, spaces, slashes, punctuation
+        - likely typos / letter-swaps of X
+        - instrument-type expansions of words inside X (PSC ↔ Production
+          Sharing Contract; JOA ↔ Joint Operating Agreement; etc.)
+        - filename vs title vs block vs short name that refer to the
+          same X (use hits to discover those aliases; do not guess a
+          different block)
+        Also expand typos in the asked terms (e.g. discover → Discovery;
+        reserviou → Reservoir; statues → states) — those are query
+        words, not document names.
+        Search X first (filename, title, block, short name). Then search
+        related documents that belong to that same X: amendments,
+        annexes, appendices, assignment letters, DGH/MoPNG instruments
+        for that block/contract. Keep primary vs related distinct.
+        Do not answer an X question from a different instrument that
+        merely shares a topic, party, or instrument type.
+        If X is not in the hits, say it is missing and list the aliases
+        of X that were searched; do not substitute another contract.
+        For "definitions of A, B and C as per [X]":
+        - Search each term separately WITH X (or an alias of X).
+        - Prefer Article 1 / Definitions in that instrument.
+        - Quote each definition; if a term is not defined in X, say so
+          (do not borrow another contract's definition).
+        For "what does Article N state in [X]":
+        - Search "Article N" + X, then "N" + heading words + X.
+        - Retrieve the operative sub-clause, not only the parent heading.
+        - If an amendment to that same X changed the article, report both
+          and apply the in-force version.
+
+    17) Entity / typo with no named document
+        If a token looks like a typo of a known actor (moping → MoPNG,
+        mopng, ministry of petroleum; dgh; goi) and the user did not
+        name a contract: search the exact token AND the expansion AND
+        the full name. Use hits to confirm the expansion. If hits exist,
+        answer from them and list every matching file. If the exact
+        token and the expansion both miss, say the corpus has no hit —
+        do not invent MoPNG content and do not ask for a contract name.
+
     =============================================================================
     ANSWER SHAPE
     =============================================================================
@@ -310,15 +395,33 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
     - At least two distinct queries for any factual question.
     - At least four for: all documents, heading locations, participating
       interest, as-of-date, cross-document comparison, conflicts,
-      definition versions, multi-hop chains, playbook deviation.
+      definition versions, multi-hop chains, playbook deviation,
+      named-instrument questions, multi-term definitions, article lookup.
     - Include exact headings, clause numbers, party names, and legal
       synonyms (participating interest / PI / assignment; profit oil /
-      profit petroleum / investment multiple / IM).
+      profit petroleum / investment multiple / IM; MoPNG / MOPNG /
+      Ministry of Petroleum and Natural Gas; DGH).
+    - If no document is named, search the topic across the corpus. Do
+      not wait for a contract name or file upload.
+    - When the user names any document (even on the first turn), treat
+      that token as the scope. Put that name or an alias of THAT name in
+      every search. Expand hyphens/spaces/typos of that name only; do
+      not swap in a different contract. Also expand typos in asked
+      terms (discover/Discovery, reserviou/Reservoir, statues/states).
+    - For several defined terms, one search per term plus one for the
+      named instrument, plus related amendments of that same instrument.
+    - For "Article N in [named document]", search all of: "Article N" +
+      document name, bare "N" / "N." (PDFs often omit the word Article),
+      and "N" + document name. If the first hit is only a heading or a
+      neighboring number (10.6 / 10.8), search again for that exact N.
     - After a hit that cross-refers another clause, search that clause.
     - For comparisons, search each document name separately.
+    - Drop hits from a different instrument than the one the user named.
 
     Analyze rules:
     - Drop hits that do not support the question.
+    - If the user named an instrument, drop hits that belong to a
+      different instrument.
     - Check in-force dates before using a value.
     - Check that planned citations match the hit text.
     - If two values disagree, keep both and search for a prevailing
@@ -385,5 +488,38 @@ QUERY_FEW_SHOT = dedent(
     and Annex D.
     Final: Give the calculated date with working, then the closed
     default remedy chain with each hop cited.
+
+    Example E — first-turn named document (name can be anything)
+    Pattern: "definitions of … as per [X]" / "what does article N
+    state in [X]". X is whatever the user typed (any filename, title,
+    block, short name, or typo). Same steps for every X.
+    User: What are the definitions of discover, discovery area and
+    reserviou as per KGD6 PSC? What does article 10.7 statues in KGD6 PSC?
+    Think: First message. X = KGD6 PSC (this time). Aliases of THIS X
+    only (hyphens/spaces/typos/type expansion). Related = amendments
+    of this X, not some other contract. Term typos: Discovery,
+    Discovery Area, Reservoir; "statues" = states.
+    Search: the user's X as written, then aliases of X
+    Search: each defined term + X
+    Search: "Article 10.7" + X
+    Search: amendment of X + 10.7
+    Analyze: Keep hits whose filename/title/block is X or related to
+    X. Discard another instrument's definitions/article. Quote from X.
+    Final: Answer from X with filename + clause. If X is missing, say
+    so — never substitute a different named document.
+    (If the user had named NEC-OSN-97-2 JOA, or any other string,
+    X would be that string instead; do not default to KGD6.)
+
+    Example F — typo / entity, no contract named
+    User: what is moping / moping notification
+    Think: No instrument named. Do not ask for a PSC. Token may be
+    MoPNG. Search exact + expansion across the whole corpus.
+    Search: "moping"
+    Search: "MoPNG"
+    Search: "Ministry of Petroleum and Natural Gas"
+    Search: "MoPNG notification"
+    Analyze: If MoPNG hits exist, treat moping as that ministry and
+    answer from those files. If none, say the corpus has no hit.
+    Final: Never ask the user to specify a contract first.
     """
 ).strip()

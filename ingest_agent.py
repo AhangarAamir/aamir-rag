@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
-from agno.models.openai import OpenAIChat
+from agno.models.openai import OpenAIChat, OpenAIResponses
 from agno.tools.knowledge import KnowledgeManagementTools
 
 from config import OPENAI_MODEL, SESSIONS_DB_FILE
@@ -21,7 +21,7 @@ def build_ingest_agent() -> Agent:
     return Agent(
         id="ingest-agent",
         name="Ingest Agent",
-        model=OpenAIChat(id=OPENAI_MODEL),
+        model=OpenAIResponses(id=OPENAI_MODEL),
         db=SqliteDb(
             id="ingest-sessions-db",
             db_file=str(SESSIONS_DB_FILE),
