@@ -12,7 +12,6 @@ data/incoming/*.docx
 tmp/
 uv.lock
 ui/node_modules/
-ui/dist/
 data/incoming/SAMPLE_ASSIGNMENT_LETTER_2018-06-14.pdf
 data/incoming/SAMPLE_AUDITED_STATEMENT_FY2024-25.pdf
 data/incoming/SAMPLE_DGH_APPROVAL_2018-07-20.pdf
