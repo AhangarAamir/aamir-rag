@@ -10,3 +10,5 @@ data/incoming/*.PDF
 data/incoming/*.docx
 tmp/
 uv.lock
+ui/node_modules/
+ui/dist/

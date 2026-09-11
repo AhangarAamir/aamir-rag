@@ -51,16 +51,36 @@ uv run python ingest_cli.py
 uv run python main.py query What is the participating interest of RIL?
 uv run python query_cli.py
 
-# AgentOS — both agents over HTTP (default http://localhost:7777)
+# AgentOS — both agents over HTTP, plus the query UI
 uv run python main.py os
 # or: uv run python agent_os.py
 ```
 
-Open [os.agno.com](https://os.agno.com), connect to `http://localhost:7777`, and pick **Ingest Agent** (`ingest-agent`) or **Query Agent** (`query-agent`).
+The query UI is a Vite React app. Build it once, then AgentOS serves the files at `/`:
+
+```bash
+cd ui
+npm install
+npm run build
+cd ..
+uv run python agent_os.py
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) when you start with `agent_os.py` (port 8000). `uv run python main.py os` uses AgentOS’s default port 7777. The page calls `POST /agents/query-agent/runs` (SSE) and lists this browser's chats via `GET /sessions`. A new chat uses a new `session_id`; a different browser gets a different `user_id` in `localStorage`.
+
+For live React work while AgentOS is running:
+
+```bash
+cd ui && npm run dev
+```
+
+Vite proxies `/agents` and `/sessions` to `http://127.0.0.1:8000`.
+
+The hosted control plane at [os.agno.com](https://os.agno.com) can still connect to the same AgentOS instance. Pick **Ingest Agent** (`ingest-agent`) or **Query Agent** (`query-agent`).
 
 ```bash
 # example: run query agent via the AgentOS API
-curl -X POST http://localhost:7777/agents/query-agent/runs \
+curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "message=What is the participating interest of RIL?" \
   -d "stream=false"
