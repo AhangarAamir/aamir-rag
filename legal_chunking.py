@@ -7,15 +7,17 @@ and stamps each chunk so retrieval can stay on the named instrument.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, IO, List, Optional, Sequence, Union
 
 from agno.agent import Agent
-from agno.db.sqlite import SqliteDb
+from agno.knowledge.chunking.recursive import RecursiveChunking
 from agno.knowledge.chunking.strategy import ChunkingStrategy
 from agno.knowledge.document.base import Document
 from agno.knowledge.reader.markdown_reader import MarkdownReader
@@ -31,11 +33,12 @@ from document_catalog import (
     normalize_family_code,
 )
 from config import (
+    CHUNKER_ASYNC,
+    CHUNKER_CONCURRENCY,
     CHUNKING_MAX_SIZE,
     INCOMING_DIR,
     OPENAI_MODEL,
     ROOT_DIR,
-    SESSIONS_DB_FILE,
 )
 from prompts import LEGAL_CHUNKER_INSTRUCTIONS
 
@@ -61,6 +64,11 @@ GENERIC_QUERY_WORDS = frozenset(
         "statues",
     }
 )
+
+_CLAUSE_LINE = re.compile(
+    r"(?im)^\s*(?:article|clause|section)\s+(\d+(?:\.\d+)*)\b([^\n]{0,80})"
+)
+_NUMBERED_LINE = re.compile(r"(?m)^\s*(\d+\.\d+(?:\.\d+)*)\b([^\n]{0,80})")
 
 _chunker_agent: Agent | None = None
 
@@ -358,23 +366,42 @@ def _parse_decision(content: Any) -> Optional[LegalChunkDecision]:
     return None
 
 
+def _run_sync(coro):
+    """Run an async coroutine from sync ingest (no running loop) or a worker thread."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+def _heuristic_clause(text: str) -> tuple[str, str, str]:
+    match = _CLAUSE_LINE.search(text or "")
+    if match:
+        clause = normalize_clause(match.group(1))
+        heading = match.group(2).strip(" :-")
+        return clause, normalize_article(clause), heading
+    match = _NUMBERED_LINE.search(text or "")
+    if match:
+        clause = normalize_clause(match.group(1))
+        heading = match.group(2).strip(" :-")
+        return clause, normalize_article(clause), heading
+    return "", "", ""
+
+
 def get_chunker_agent() -> Agent:
     global _chunker_agent
     if _chunker_agent is not None:
         return _chunker_agent
+    # No session DB: parallel arun() must not contend on SQLite, and per-chunk
+    # session summaries would add a second LLM call each. Document identity is
+    # captured once and passed into every label prompt.
     _chunker_agent = Agent(
         id="legal-chunker",
         name="Legal Chunker",
         model=OpenAIResponses(id=OPENAI_MODEL),
-        db=SqliteDb(
-            id="chunker-sessions-db",
-            db_file=str(SESSIONS_DB_FILE),
-            session_table="chunker_sessions",
-        ),
         output_schema=LegalChunkDecision,
-        enable_session_summaries=True,
-        add_session_summary_to_context=True,
-        add_history_to_context=False,
         markdown=False,
         instructions=LEGAL_CHUNKER_INSTRUCTIONS,
     )
@@ -402,12 +429,140 @@ class LocatorChunking(ChunkingStrategy):
 
 
 class LegalAgenticChunking(ChunkingStrategy):
-    """Walk windows, call the chunker agent, stamp metadata, keep a running summary."""
+    """Split locally, then label chunks with parallel async agent calls.
+
+    Sequential window-by-window LLM splits are slow. Default path:
+    1. Recursive split (no model).
+    2. One identity call on the document head.
+    3. Concurrent ``agent.arun`` metadata labeling, capped by CHUNKER_CONCURRENCY.
+    """
 
     def __init__(self, max_chunk_size: int = CHUNKING_MAX_SIZE):
         self.chunk_size = max_chunk_size
+        self._splitter = RecursiveChunking(chunk_size=max_chunk_size, overlap=200)
 
     def chunk(self, document: Document) -> List[Document]:
+        return _run_sync(self.achunk(document))
+
+    async def achunk(self, document: Document) -> List[Document]:
+        if CHUNKER_ASYNC:
+            return await self._chunk_parallel(document)
+        return await self._chunk_sequential(document)
+
+    async def _chunk_parallel(self, document: Document) -> List[Document]:
+        text = _light_clean(document.content or "")
+        if not text:
+            return []
+
+        origin_meta = dict(document.meta_data or {})
+        name = (document.name or origin_meta.get("filename") or "document").strip()
+        split_source = Document(
+            name=name,
+            id=document.id,
+            meta_data=origin_meta,
+            content=text,
+        )
+        pieces = self._splitter.chunk(split_source)
+        if not pieces:
+            return []
+
+        agent = get_chunker_agent()
+        log_info(
+            f"Legal async chunking: {name} ({len(text)} chars) -> "
+            f"{len(pieces)} split(s), concurrency={CHUNKER_CONCURRENCY}"
+        )
+
+        identity = LegalChunkDecision(
+            split_at=len(text),
+            instrument_name=str(origin_meta.get("instrument_name") or name),
+            doc_family=str(origin_meta.get("doc_family") or ""),
+            running_summary="",
+        )
+        head = text[: min(len(text), max(self.chunk_size, 6000))]
+        profile = await self._alabel(
+            agent=agent,
+            document=document,
+            window=head,
+            remaining_len=len(text),
+            last=identity,
+            is_tail=len(text) <= len(head),
+            role="identity",
+        )
+        if profile is not None:
+            identity = profile
+
+        if len(pieces) == 1:
+            labeled = [identity]
+        else:
+            semaphore = asyncio.Semaphore(CHUNKER_CONCURRENCY)
+
+            async def _one(index: int, piece: Document) -> LegalChunkDecision:
+                async with semaphore:
+                    decision = await self._alabel(
+                        agent=agent,
+                        document=document,
+                        window=piece.content or "",
+                        remaining_len=len(piece.content or ""),
+                        last=identity,
+                        is_tail=index == len(pieces) - 1,
+                        role="label",
+                        chunk_index=index + 1,
+                        chunk_count=len(pieces),
+                    )
+                    if decision is None:
+                        clause, article, heading = _heuristic_clause(piece.content or "")
+                        return identity.model_copy(
+                            update={
+                                "split_at": len(piece.content or ""),
+                                "clause_id": clause,
+                                "article": article,
+                                "heading": heading,
+                            }
+                        )
+                    decision.instrument_name = decision.instrument_name or identity.instrument_name
+                    decision.instrument_aliases = decision.instrument_aliases or list(
+                        identity.instrument_aliases
+                    )
+                    decision.doc_family = decision.doc_family or identity.doc_family
+                    decision.parties = decision.parties or list(identity.parties)
+                    decision.block = decision.block or identity.block
+                    decision.document_status = decision.document_status or identity.document_status
+                    decision.running_summary = identity.running_summary
+                    return decision
+
+            labeled = list(
+                await asyncio.gather(
+                    *[_one(index, piece) for index, piece in enumerate(pieces)]
+                )
+            )
+
+        chunks: List[Document] = []
+        for index, (piece, decision) in enumerate(zip(pieces, labeled), start=1):
+            chunk_text = (piece.content or "").strip()
+            if not chunk_text:
+                continue
+            meta = self._chunk_metadata(
+                document=document,
+                decision=decision,
+                chunk_number=index,
+                chunk_text=chunk_text,
+            )
+            chunks.append(
+                Document(
+                    id=self._generate_chunk_id(document, index, chunk_text),
+                    name=name,
+                    meta_data=meta,
+                    content=locator_prefix(meta, name) + chunk_text,
+                )
+            )
+            log_info(
+                f"  chunk {index}: {meta.get('instrument_name')} "
+                f"clause={meta.get('clause_id') or '-'} family={meta.get('doc_family') or '-'}"
+            )
+        log_info(f"Legal async chunking done: {name} -> {len(chunks)} chunk(s)")
+        return chunks
+
+    async def _chunk_sequential(self, document: Document) -> List[Document]:
         text = _light_clean(document.content or "")
         if not text:
             return []
@@ -426,19 +581,20 @@ class LegalAgenticChunking(ChunkingStrategy):
             running_summary="",
         )
 
-        log_info(f"Legal agentic chunking: {name} ({len(text)} chars), session {session_id}")
+        log_info(f"Legal sequential chunking: {name} ({len(text)} chars), session {session_id}")
 
         while remaining:
             window = remaining[: self.chunk_size]
             is_tail = len(remaining) <= self.chunk_size
-            decision = self._decide_window(
+            decision = await self._alabel(
                 agent=agent,
-                session_id=session_id,
                 document=document,
                 window=window,
                 remaining_len=len(remaining),
                 last=last,
                 is_tail=is_tail,
+                role="split",
+                session_id=session_id,
             )
             if decision is None:
                 split_at = len(window) if is_tail else _fallback_split(window, self.chunk_size)
@@ -462,13 +618,12 @@ class LegalAgenticChunking(ChunkingStrategy):
                 chunk_number=chunk_number,
                 chunk_text=chunk_text,
             )
-            prefix = locator_prefix(meta, name)
             chunks.append(
                 Document(
                     id=self._generate_chunk_id(document, chunk_number, chunk_text),
                     name=name,
                     meta_data=meta,
-                    content=prefix + chunk_text,
+                    content=locator_prefix(meta, name) + chunk_text,
                 )
             )
             log_info(
@@ -477,7 +632,7 @@ class LegalAgenticChunking(ChunkingStrategy):
             )
             chunk_number += 1
 
-        log_info(f"Legal agentic chunking done: {name} -> {len(chunks)} chunk(s)")
+        log_info(f"Legal sequential chunking done: {name} -> {len(chunks)} chunk(s)")
         return chunks
 
     def _decide_window(
@@ -491,8 +646,53 @@ class LegalAgenticChunking(ChunkingStrategy):
         last: LegalChunkDecision,
         is_tail: bool,
     ) -> Optional[LegalChunkDecision]:
+        return _run_sync(
+            self._alabel(
+                agent=agent,
+                document=document,
+                window=window,
+                remaining_len=remaining_len,
+                last=last,
+                is_tail=is_tail,
+                role="split",
+                session_id=session_id,
+            )
+        )
+
+    async def _alabel(
+        self,
+        *,
+        agent: Agent,
+        document: Document,
+        window: str,
+        remaining_len: int,
+        last: LegalChunkDecision,
+        is_tail: bool,
+        role: str,
+        session_id: Optional[str] = None,
+        chunk_index: int = 0,
+        chunk_count: int = 0,
+    ) -> Optional[LegalChunkDecision]:
         meta = document.meta_data or {}
+        task = {
+            "identity": (
+                "ROLE: document identity. Read the opening text and fill instrument_name, "
+                "aliases, doc_family, parties, block, document_status, running_summary. "
+                "Set split_at to window_length."
+            ),
+            "label": (
+                f"ROLE: label pre-split chunk {chunk_index}/{chunk_count}. "
+                "Reuse PRIOR instrument_name/doc_family. Extract clause_id, article, "
+                "heading, content_type, cross_references, defined_terms. "
+                "Set split_at to window_length."
+            ),
+            "split": (
+                "ROLE: choose split_at in this window and extract metadata. "
+                "Keep instrument_name stable."
+            ),
+        }.get(role, "Extract metadata.")
         prompt = (
+            f"{task}\n\n"
             f"SOURCE\n"
             f"- filename: {meta.get('filename') or document.name or ''}\n"
             f"- folder_path: {meta.get('folder_path') or ''}\n"
@@ -510,11 +710,12 @@ class LegalAgenticChunking(ChunkingStrategy):
             f"- split_at must be an index in this window, 1..{len(window)}\n\n"
             f"TEXT:\n---\n{window}\n---"
         )
+        run_session = session_id or f"legal-chunk:{role}:{uuid.uuid4().hex[:10]}"
         try:
-            response = agent.run(prompt, session_id=session_id)
+            response = await agent.arun(prompt, session_id=run_session)
             return _parse_decision(getattr(response, "content", None))
         except Exception as exc:
-            log_warning(f"Chunker agent failed, using fallback split: {exc}")
+            log_warning(f"Chunker agent failed ({role}), using fallback: {exc}")
             return None
 
     def _chunk_metadata(
@@ -634,8 +835,27 @@ def _stamp_then_chunk(
     for doc in documents:
         apply_origin(doc, origin)
     if chunk and documents:
-        return reader._build_chunked_documents(documents) if hasattr(reader, "_build_chunked_documents") else [
-            piece for doc in documents for piece in reader.chunk_document(doc)
+        return [
+            piece
+            for doc in documents
+            for piece in reader.chunk_document(doc)
+        ]
+    return documents
+
+
+async def _stamp_then_achunk(
+    documents: List[Document],
+    origin: SourceOrigin,
+    chunk: bool,
+    reader: PDFReader | MarkdownReader | TextReader,
+) -> List[Document]:
+    for doc in documents:
+        apply_origin(doc, origin)
+    if chunk and documents:
+        return [
+            piece
+            for group in await asyncio.gather(*[reader.achunk_document(doc) for doc in documents])
+            for piece in group
         ]
     return documents
 
@@ -671,7 +891,7 @@ class PathAwarePDFReader(PDFReader):
             documents = await super().async_read(pdf, name=name, password=password)
         finally:
             self.chunk = was_chunk
-        return _stamp_then_chunk(documents, origin, was_chunk, self)
+        return await _stamp_then_achunk(documents, origin, was_chunk, self)
 
 
 def _read_with_origin(
@@ -700,13 +920,14 @@ class PathAwareMarkdownReader(MarkdownReader):
         return _read_with_origin(self, file, name, documents, was_chunk)
 
     async def async_read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        origin = origin_from_source(file, name)
         was_chunk = self.chunk
         self.chunk = False
         try:
             documents = await super().async_read(file, name=name)
         finally:
             self.chunk = was_chunk
-        return _read_with_origin(self, file, name, documents, was_chunk)
+        return await _stamp_then_achunk(documents, origin, was_chunk, self)
 
 
 class PathAwareTextReader(TextReader):
@@ -720,10 +941,11 @@ class PathAwareTextReader(TextReader):
         return _read_with_origin(self, file, name, documents, was_chunk)
 
     async def async_read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        origin = origin_from_source(file, name)
         was_chunk = self.chunk
         self.chunk = False
         try:
             documents = await super().async_read(file, name=name)
         finally:
             self.chunk = was_chunk
-        return _read_with_origin(self, file, name, documents, was_chunk)
+        return await _stamp_then_achunk(documents, origin, was_chunk, self)

@@ -107,9 +107,11 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | `EMBEDDING_MODEL` | default `text-embedding-3-large` |
 | `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
 | `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
+| `CHUNKER_ASYNC` | `true` (default): recursive split + parallel `agent.arun` labels |
+| `CHUNKER_CONCURRENCY` | parallel metadata calls per document (default `8`) |
 | `SEARCH_MAX_RESULTS` | hits returned by `search_knowledge` (default `12`) |
 
-`agentic` uses the custom legal chunker (inner agent + metadata + session summary). It is slower and requires a re-ingest after changing strategy. Switch to `document` if ingest is too expensive.
+`agentic` uses the custom legal chunker. Default is async: local recursive split, one identity call, then parallel metadata labeling. Set `CHUNKER_ASYNC=false` for the old sequential window walk. Switch to `document` if ingest is still too expensive.
 
 ## What each agent does
 

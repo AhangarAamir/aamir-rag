@@ -394,6 +394,8 @@ LEGAL_CHUNKER_INSTRUCTIONS = dedent(
     Split rules:
     - split_at is a character index inside THIS window, from 1 to
       window_length. Do not use positions from the full document.
+    - If the text is already one pre-split chunk, set split_at to
+      window_length and only extract metadata.
     - Prefer one complete numbered clause per chunk (10.7, 28.5, (a)).
     - Keep heading + body + provisos + "provided that" + subparagraphs
       that belong to the clause.
