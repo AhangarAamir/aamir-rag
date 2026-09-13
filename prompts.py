@@ -16,6 +16,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from config import INCOMING_DIR
+from document_catalog import family_codes, family_prompt_block
 
 CHUNKING_INSTRUCTIONS = dedent(
     """
@@ -381,6 +382,48 @@ CHUNKING_INSTRUCTIONS = dedent(
     """
 ).strip()
 
+LEGAL_CHUNKER_INSTRUCTIONS = dedent(
+    f"""
+    You segment oil and gas legal instruments into retrieval-ready chunks
+    and extract metadata. You are called once per text window of one
+    document. A session summary of earlier windows in this same document
+    is in context when available. Keep identity stable.
+
+    Return only the structured schema. Do not write prose.
+
+    Split rules:
+    - split_at is a character index inside THIS window, from 1 to
+      window_length. Do not use positions from the full document.
+    - Prefer one complete numbered clause per chunk (10.7, 28.5, (a)).
+    - Keep heading + body + provisos + "provided that" + subparagraphs
+      that belong to the clause.
+    - Never cut a sentence, definition, or table row in half.
+    - If the clause continues past this window, end at the last complete
+      sentence or numbered item in the window.
+    - If is_last_window is true, set split_at to window_length.
+    - Table of contents: content_type = toc.
+    - Definitions: content_type = definition and fill defined_terms.
+
+    Identity rules:
+    - instrument_name is the named contract, not a generic type. Examples:
+      "KGD6 PSC", "NEC-OSN-97-2 JOA". Reuse the prior instrument_name
+      unless this window clearly names a different instrument.
+    - Put hyphen/space/OCR variants in instrument_aliases
+      (KGD6, KG-D6, KG D6).
+    - doc_family must be one catalog code. Prefer folder_path
+      (JOA/New JOA, JAO/NEW JAO, PSC/Domestic, PML) over guessing.
+{family_prompt_block()}
+    - clause_id is the dotted number only (10.7). article is 10.
+    - parties, block, heading, document_status when visible.
+    - Correct obvious OCR only when certain: "ARTICLE IO" -> Article 10,
+      "I 0.7" -> 10.7. Set ocr_uncertainty true when unsure.
+    - running_summary: 2-4 sentences that a later window can trust:
+      instrument, parties, block, current article, status. Do not
+      replace a named instrument with a different contract that merely
+      shares a party or clause number.
+    """
+).strip()
+
 INGEST_INSTRUCTIONS = dedent(
     f"""
     You are the ingestion operator for an oil and gas contract knowledge
@@ -400,19 +443,12 @@ INGEST_INSTRUCTIONS = dedent(
     1. If the user provides a file or folder path, ingest that path.
     2. If the user says "ingest incoming" or provides no path, ingest:
        "{INCOMING_DIR}"
-    3. Load every supported file, including:
-       - PSCs;
-       - JOAs;
-       - assignments and farm-ins;
-       - DGH and MoPNG letters;
-       - Government notifications;
-       - amendments;
-       - annexures, appendices and schedules;
-       - minutes;
-       - audited statements;
-       - guarantees;
-       - model forms and playbooks;
-       - drafts and term sheets.
+    3. Load every supported file, including catalog families
+       ({", ".join(family_codes())}) from folders such as:
+       - JOA/New JOA, JOA/Old JOA;
+       - JAO/NEW JAO, JAO/OLD JAO;
+       - PSC/Domestic;
+       - PML, RSC, PEL, FDP, DGH, MCM, MOM, QPR.
     4. Never discard a draft, minute, playbook or model form merely because
        it is not operative. Load it and store its status.
     5. Prefer local files over URLs unless the user explicitly provides a URL.
@@ -595,8 +631,11 @@ QUERY_INSTRUCTIONS = dedent(
     - search related amendments, appendices, schedules, assignments,
       approvals and notifications belonging to that instrument or block;
     - include the instrument name or a confirmed alias in every search;
-    - reject hits from another contract that merely shares a party,
-      topic or instrument type;
+    - pass search_knowledge filters: instrument_name, and clause_id or
+      article when the user named a clause, and doc_family when obvious
+      (PSC, JOA, JAO, PML, RSC, PEL, DGH, MCM, …);
+    - reject hits whose metadata instrument_name/filename/folder is a
+      different contract that merely shares a party, topic or type;
     - never silently substitute another document.
 
     If no instrument is named:
@@ -929,6 +968,9 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
 
     2. For every factual contract or document question:
        call think, then search_knowledge at least twice, then analyze.
+       When the user names an instrument or clause, set the matching
+       search_knowledge filters (instrument_name, clause_id, article,
+       doc_family). Do not rely on the query string alone.
 
     3. For named instruments, article lookup, PI, as-of-date, comparisons,
        conflicts, definition versions, multi-hop, playbook deviation or
@@ -1033,10 +1075,11 @@ QUERY_FEW_SHOT = dedent(
     only (hyphens/spaces/typos/type expansion). Related = amendments
     of this X, not some other contract. Term typos: Discovery,
     Discovery Area, Reservoir; "statues" = states.
-    Search: the user's X as written, then aliases of X
-    Search: each defined term + X
-    Search: "Article 10.7" + X
-    Search: amendment of X + 10.7
+    Search: query=X, filters instrument_name=X
+    Search: each defined term + X, filters instrument_name=X
+    Search: "Article 10.7" + X, filters instrument_name=X, clause_id=10.7,
+            doc_family=PSC
+    Search: amendment of X + 10.7, filters instrument_name=X
     Analyze: Keep hits whose filename/title/block is X or related to
     X. Discard another instrument's definitions/article. Quote from X.
     Final: Answer from X with filename + clause. If X is missing, say

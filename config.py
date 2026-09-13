@@ -18,10 +18,16 @@ COLLECTION_NAME = "legal_contracts"
 INCOMING_DIR.mkdir(parents=True, exist_ok=True)
 VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
 
+from document_catalog import ensure_incoming_layout
+
+ensure_incoming_layout(INCOMING_DIR)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
 CHUNKING_STRATEGY = os.getenv("CHUNKING_STRATEGY", "agentic").strip().lower()
+CHUNKING_MAX_SIZE = int(os.getenv("CHUNKING_MAX_SIZE", "4000"))
+SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "12"))
 QUERY_SESSION_ID = os.getenv("QUERY_SESSION_ID", "legal-query-default")
 NUM_HISTORY_RUNS = int(os.getenv("NUM_HISTORY_RUNS", "5"))
 SESSIONS_DB_FILE = DATA_DIR / "sessions.db"

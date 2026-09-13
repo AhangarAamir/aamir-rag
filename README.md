@@ -17,7 +17,8 @@ data/incoming/*.pdf
         ▼
  Shared Knowledge
    Chroma (vectors) + SQLite contents db
-   PDF reader uses AgenticChunking (LLM picks section cuts)
+   Path-aware PDF reader + LegalAgenticChunking
+   (inner agent returns clause metadata + running summary)
         │
         ▼
  Query Agent
@@ -38,7 +39,18 @@ uv sync
 cp .env.example .env   # set OPENAI_API_KEY
 ```
 
-Put PDFs in `data/incoming/`.
+Put PDFs in `data/incoming/`, using the same families as the old ingest notebook:
+
+```text
+data/incoming/
+  JOA/New JOA/
+  JOA/Old JOA/
+  JAO/NEW JAO/
+  JAO/OLD JAO/
+  PSC/Domestic/
+  PML/
+  RSC, PEL, FDP, DGH, MCM, MOM, QPR, …
+```
 
 ## Run
 
@@ -93,9 +105,11 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | `OPENAI_API_KEY` | required |
 | `OPENAI_MODEL` | default `gpt-4o` |
 | `EMBEDDING_MODEL` | default `text-embedding-3-large` |
-| `CHUNKING_STRATEGY` | `agentic` (default), `document`, or `recursive` |
+| `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
+| `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
+| `SEARCH_MAX_RESULTS` | hits returned by `search_knowledge` (default `12`) |
 
-`agentic` matches the idea that the model decides section boundaries while saving. It is slower and can be inconsistent across re-ingests. Switch to `document` if ingest is too expensive.
+`agentic` uses the custom legal chunker (inner agent + metadata + session summary). It is slower and requires a re-ingest after changing strategy. Switch to `document` if ingest is too expensive.
 
 ## What each agent does
 
@@ -103,8 +117,9 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 
 1. User points at a file, folder, or `data/incoming`.
 2. Agent calls `ingest_path`.
-3. PDF reader splits with AgenticChunking (or the strategy in `.env`).
-4. Chunks land in Chroma. Content rows land in `data/contents.db`.
+3. PDF reader stamps folder/filename, then LegalAgenticChunking (or the strategy in `.env`).
+4. Each chunk stores instrument, family, article, clause, and a locator prefix.
+   Vectors land in Chroma. Content rows land in `data/contents.db`.
 
 **Query**
 

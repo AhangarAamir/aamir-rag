@@ -2,96 +2,76 @@
 
 Ingest agent writes here. Query agent searches it as a tool at runtime
 (KnowledgeTools), not by stuffing chunks into the prompt.
+
+Agno's path ingest uses ReaderFactory, not Knowledge.readers, so custom
+readers are registered in both places.
 """
 
 from __future__ import annotations
 
-from typing import List
-
 from agno.db.sqlite import SqliteDb
-from agno.knowledge.chunking.agentic import AgenticChunking
 from agno.knowledge.chunking.document import DocumentChunking
 from agno.knowledge.chunking.recursive import RecursiveChunking
 from agno.knowledge.chunking.strategy import ChunkingStrategy
-from agno.knowledge.document.base import Document
 from agno.knowledge.embedder.openai import OpenAIEmbedder
 from agno.knowledge.knowledge import Knowledge
-from agno.knowledge.reader.markdown_reader import MarkdownReader
-from agno.knowledge.reader.pdf_reader import PDFReader
-from agno.knowledge.reader.text_reader import TextReader
-from agno.models.openai import OpenAIResponses
-from agno.utils.log import log_info
+from agno.knowledge.reader.reader_factory import ReaderFactory
 from agno.vectordb.chroma import ChromaDb
 from agno.vectordb.search import SearchType
 
 from config import (
+    CHUNKING_MAX_SIZE,
     CHUNKING_STRATEGY,
     COLLECTION_NAME,
     DATA_DIR,
     EMBEDDING_MODEL,
-    OPENAI_MODEL,
     VECTOR_DB_DIR,
     require_api_key,
 )
-from prompts import CHUNKING_INSTRUCTIONS
+from legal_chunking import (
+    LegalAgenticChunking,
+    LocatorChunking,
+    PathAwareMarkdownReader,
+    PathAwarePDFReader,
+    PathAwareTextReader,
+)
 
 _knowledge: Knowledge | None = None
 
 
-class NamedChunking(ChunkingStrategy):
-    """Run an inner splitter, then stamp the source filename on every chunk.
-
-    Markdown/text ingest never used the PDF reader, so the old PDF-only
-    prefix never ran. This wrapper applies to every reader we register.
-    """
-
-    def __init__(self, inner: ChunkingStrategy):
-        self.inner = inner
-
-    def chunk(self, document: Document) -> List[Document]:
-        chunks = self.inner.chunk(document)
-        name = (document.name or "").strip()
-        log_info(f"Chunking document: {name} -> {len(chunks)} chunk(s)")
-        if not name:
-            return chunks
-        prefix = f"[Document: {name}]\n"
-        for piece in chunks:
-            if piece.content and not piece.content.startswith("[Document:"):
-                piece.content = prefix + piece.content
-        return chunks
-
-
 def build_chunking_strategy() -> ChunkingStrategy:
     if CHUNKING_STRATEGY == "document":
-        inner: ChunkingStrategy = DocumentChunking()
-    elif CHUNKING_STRATEGY == "recursive":
-        inner = RecursiveChunking(chunk_size=1800, overlap=200)
-    else:
-        inner = AgenticChunking(
-            model=OpenAIResponses(id=OPENAI_MODEL),
-            custom_prompt=CHUNKING_INSTRUCTIONS,
-            max_chunk_size=4000,
-        )
-    return NamedChunking(inner)
+        return LocatorChunking(DocumentChunking())
+    if CHUNKING_STRATEGY == "recursive":
+        return LocatorChunking(RecursiveChunking(chunk_size=1800, overlap=200))
+    return LegalAgenticChunking(max_chunk_size=CHUNKING_MAX_SIZE)
 
 
 def _attach_readers(knowledge: Knowledge) -> None:
     strategy = build_chunking_strategy()
-    if knowledge.readers is None:
-        knowledge.readers = {}
-    knowledge.readers["pdf"] = PDFReader(
+    pdf_reader = PathAwarePDFReader(
         name="Legal PDF Reader",
         split_on_pages=False,
         chunking_strategy=strategy,
     )
-    knowledge.readers["markdown"] = MarkdownReader(
+    markdown_reader = PathAwareMarkdownReader(
         name="Legal Markdown Reader",
         chunking_strategy=strategy,
     )
-    knowledge.readers["text"] = TextReader(
+    text_reader = PathAwareTextReader(
         name="Legal Text Reader",
         chunking_strategy=strategy,
     )
+    if knowledge.readers is None:
+        knowledge.readers = {}
+    knowledge.readers["pdf"] = pdf_reader
+    knowledge.readers["markdown"] = markdown_reader
+    knowledge.readers["text"] = text_reader
+    # Path ingest uses ReaderFactory.get_reader_for_extension, which caches
+    # a default PDFReader. Replace that cache so ingest_path uses this strategy.
+    ReaderFactory._reader_cache["pdf"] = pdf_reader
+    ReaderFactory._reader_cache["markdown"] = markdown_reader
+    ReaderFactory._reader_cache["text"] = text_reader
 
 
 def get_knowledge() -> Knowledge:

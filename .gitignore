@@ -7,6 +7,9 @@ data/vectordb/
 data/*.db
 data/incoming/*.pdf
 data/incoming/*.PDF
+data/incoming/**/*.pdf
+data/incoming/**/*.PDF
+!data/incoming/SAMPLE_*.pdf
 !data/incoming/SAMPLE_*.pdf
 data/incoming/*.docx
 tmp/
@@ -22,3 +25,4 @@ data/incoming/SAMPLE_MODEL_JOA_PLAYBOOK_2012.pdf
 data/incoming/SAMPLE_MOPNG_ROYALTY_NOTIFICATION_2026-06-04.pdf
 data/incoming/SAMPLE_PSC_AMENDMENT_2016.pdf
 data/incoming/SAMPLE_PSC_NEC-OSN-97-2_2000.pdf
+data/*
