@@ -1,19 +1,50 @@
-"""Folder-path tags for JAO / PSC / PML trees."""
+"""Folder-path tags from the live ingest tree (JOA / PSC / PML / …)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict
 
+# Keys match folder-name slugs after lowercasing and replacing _ with space.
+# Canonical values follow the old ingest collections in
+# Ingestion_Agent-Batch-remove_duplicates.ipynb (self.collections).
 FAMILY_NAMES = {
-    "jao": "JAO",
-    "joa": "JAO",
+    "qpr": "QPR",
+    "nec25": "NEC25",
+    "nec 25": "NEC25",
+    "nec-25": "NEC25",
+    "mcr": "MCR",
+    "mom": "MOM",
+    "polar satelite": "POLAR_SATELITE",
+    "polar satellite": "POLAR_SATELITE",
+    "audited statement": "AUDITED_STATEMENT",
+    "audited statements": "AUDITED_STATEMENT",
     "psc": "PSC",
+    "ocr": "OCR",
+    "mcm": "MCM",
+    "budget": "BUDGET",
+    "pel": "PEL",
+    "fdp": "FDP",
+    "auditedaccounts": "AUDITED_ACCOUNTS",
+    "audited accounts": "AUDITED_ACCOUNTS",
+    "monthlystatusreport": "MONTHLY_STATUS_REPORT",
+    "monthly status report": "MONTHLY_STATUS_REPORT",
+    "dgh": "DGH",
+    "wpb": "WPB",
+    "range clearence": "RANGE_CLEARENCE",
+    "range clearance": "RANGE_CLEARENCE",
+    "joa": "JOA",
+    "jao": "JOA",
     "pml": "PML",
+    "rsc": "RSC",
 }
 VINTAGE_NAMES = {
     "new": "NEW",
     "old": "OLD",
+    "new joa": "NEW",
+    "old joa": "OLD",
+    "new jao": "NEW",
+    "old jao": "OLD",
 }
 REGION_NAMES = {
     "domestic": "Domestic",
@@ -68,10 +99,10 @@ def folder_tags_from_path(path: Path, root: Path | None = None) -> Dict[str, str
         if key in REGION_NAMES:
             region = REGION_NAMES[key]
         if "new" in key and ("jao" in key or "joa" in key):
-            family = "JAO"
+            family = "JOA"
             vintage = "NEW"
         elif "old" in key and ("jao" in key or "joa" in key):
-            family = "JAO"
+            family = "JOA"
             vintage = "OLD"
 
     tags = {
