@@ -23,6 +23,12 @@ def main() -> None:
         query_main()
         return
 
+    if mode in {"reingest"}:
+        from ingest_pipeline import ingest_legal_tree
+
+        print(ingest_legal_tree(reset_aliases=True, replace_all=True))
+        return
+
     if mode in {"os", "serve", "agentos"}:
         from agent_os import agent_os
 
@@ -31,6 +37,7 @@ def main() -> None:
 
     print("Legal RAG (Agno)")
     print("  uv run python main.py ingest [message]")
+    print("  uv run python main.py reingest")
     print("  uv run python main.py query [question]")
     print("  uv run python main.py os")
     print("  uv run python ingest_cli.py")

@@ -13,7 +13,8 @@ def main() -> None:
         agent.print_response(" ".join(sys.argv[1:]), stream=True)
         return
 
-    print("Ingest agent ready. Example: ingest all PDFs in data/incoming")
+    print("Ingest agent ready. Prefer: ingest the tree in data/incoming")
+    print("Example: ingest all PDFs in data/incoming")
     print("Ctrl-C to exit.\n")
     while True:
         try:

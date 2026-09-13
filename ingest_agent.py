@@ -1,6 +1,7 @@
 """Ingest agent: loads files into the shared knowledge base.
 
-Uses Agno KnowledgeManagementTools (ingest_path / list_content / ingest_status).
+Uses ingest_legal_tree (per-file folder tags + uniqueness metadata) plus
+Agno KnowledgeManagementTools for list/status/url fallback.
 Does not answer legal questions.
 """
 
@@ -8,12 +9,39 @@ from __future__ import annotations
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
-from agno.models.openai import OpenAIChat, OpenAIResponses
+from agno.models.openai import OpenAIResponses
+from agno.run import RunContext
+from agno.tools import Toolkit
 from agno.tools.knowledge import KnowledgeManagementTools
 
-from config import OPENAI_MODEL, SESSIONS_DB_FILE
+from config import INCOMING_DIR, OPENAI_MODEL, SESSIONS_DB_FILE
+from ingest_pipeline import ingest_legal_tree
 from knowledge_store import get_knowledge
 from prompts import INGEST_INSTRUCTIONS
+
+
+class LegalIngestTools(Toolkit):
+    """Per-file ingest that keeps JAO/PSC/PML folder identity on each PDF."""
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="legal_ingest",
+            tools=[self.ingest_legal_tree],
+            **kwargs,
+        )
+
+    def ingest_legal_tree(self, run_context: RunContext, path: str = "") -> str:
+        """Ingest a legal file or nested folder tree into the knowledge base.
+
+        Prefer this over ingest_path. Nested folders such as JAO, NEW JAO,
+        OLD JAO, PSC, Domestic, and PML become metadata on each file. After
+        split, a metadata agent stamps uniqueness fields used at search time.
+
+        Args:
+            path: File or directory. Empty uses the default incoming folder.
+        """
+        target = (path or "").strip() or str(INCOMING_DIR)
+        return ingest_legal_tree(target)
 
 
 def build_ingest_agent() -> Agent:
@@ -28,6 +56,7 @@ def build_ingest_agent() -> Agent:
             session_table="ingest_sessions",
         ),
         tools=[
+            LegalIngestTools(),
             KnowledgeManagementTools(
                 knowledge=knowledge,
                 ingest_path=True,
@@ -36,7 +65,7 @@ def build_ingest_agent() -> Agent:
                 remove_content=False,
                 instructions=INGEST_INSTRUCTIONS,
                 add_instructions=True,
-            )
+            ),
         ],
         search_knowledge=False,
         markdown=True,

@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "agno>=3.0.9",
     "chromadb>=1.5.9",
+    "docling>=2.126.0",
     "fastapi>=0.115.0",
     "openai>=3.10.0",
     "pypdf>=6.18.0",

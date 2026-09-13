@@ -14,6 +14,7 @@ DATA_DIR = ROOT_DIR / "data"
 INCOMING_DIR = DATA_DIR / "incoming"
 VECTOR_DB_DIR = DATA_DIR / "vectordb"
 COLLECTION_NAME = "legal_contracts"
+ALIASES_DB_FILE = DATA_DIR / "aliases.db"
 
 INCOMING_DIR.mkdir(parents=True, exist_ok=True)
 VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -21,9 +22,11 @@ VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
-CHUNKING_STRATEGY = os.getenv("CHUNKING_STRATEGY", "agentic").strip().lower()
+CHUNKING_STRATEGY = os.getenv("CHUNKING_STRATEGY", "recursive").strip().lower()
 QUERY_SESSION_ID = os.getenv("QUERY_SESSION_ID", "legal-query-default")
 NUM_HISTORY_RUNS = int(os.getenv("NUM_HISTORY_RUNS", "5"))
+METADATA_BATCH_SIZE = int(os.getenv("METADATA_BATCH_SIZE", "4"))
+DOCUMENT_CARD_CHARS = int(os.getenv("DOCUMENT_CARD_CHARS", "12000"))
 SESSIONS_DB_FILE = DATA_DIR / "sessions.db"
 
 

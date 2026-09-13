@@ -5,6 +5,7 @@ __pycache__/
 *.pyo
 data/vectordb/
 data/*.db
+data/aliases.db
 data/incoming/*.pdf
 data/incoming/*.PDF
 !data/incoming/SAMPLE_*.pdf

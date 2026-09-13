@@ -2,30 +2,31 @@
 
 Two agents, one shared knowledge base. Query time uses the knowledge base **as a tool** (`think` → `search_knowledge` → `analyze`), not traditional RAG that dumps chunks into the prompt.
 
-This is a v1 scaffold. Clause IDs, as-of-date tables, PI ledger, and fiscal calculators are later phases.
+After split, a metadata agent sees the **file + chunk** and writes a uniqueness card (document aliases, article/clause locator, search prefix). Query search applies **hard filters** for a named instrument so another PSC is not substituted.
 
 ## Architecture
 
 ```text
-data/incoming/*.pdf
+JAO / PSC / PML / ... nested PDFs
         │
         ▼
  Ingest Agent
-   tools: KnowledgeManagementTools
-     ingest_path / ingest_url / list_content / ingest_status
+   ingest_legal_tree (preferred)
+     per-file folder tags
+     split → metadata agent uniqueness card
+     search prefix + Chroma metadata
+   fallback: ingest_path / ingest_url
         │
         ▼
  Shared Knowledge
-   Chroma (vectors) + SQLite contents db
-   PDF reader uses AgenticChunking (LLM picks section cuts)
+   Chroma (hybrid) + SQLite contents db + alias catalog
         │
         ▼
  Query Agent
-   tools: KnowledgeTools
-     think / search_knowledge / analyze
+   think / search_knowledge(query, document, article, clause) / analyze
         │
         ▼
- Answer + citations from retrieved chunks
+ Answer + citations from scoped hits
 ```
 
 Ingest agent never answers legal questions. Query agent never writes to the knowledge base.
@@ -38,14 +39,17 @@ uv sync
 cp .env.example .env   # set OPENAI_API_KEY
 ```
 
-Put PDFs in `data/incoming/`.
+Put PDFs in `data/incoming/` (flat or nested `PSC/Domestic/...`, `JAO/NEW JAO/...`).
 
 ## Run
 
 ```bash
-# ingest
+# ingest via the agent (it should call ingest_legal_tree)
 uv run python main.py ingest ingest all PDFs in data/incoming
 uv run python ingest_cli.py
+
+# re-ingest the incoming tree with uniqueness metadata (required after this change)
+uv run python main.py reingest
 
 # query — knowledge is a tool, not preloaded context
 uv run python main.py query What is the participating interest of RIL?
@@ -93,33 +97,36 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | `OPENAI_API_KEY` | required |
 | `OPENAI_MODEL` | default `gpt-4o` |
 | `EMBEDDING_MODEL` | default `text-embedding-3-large` |
-| `CHUNKING_STRATEGY` | `agentic` (default), `document`, or `recursive` |
+| `CHUNKING_STRATEGY` | `recursive` (default), `agentic`, or `document` |
+| `METADATA_BATCH_SIZE` | chunks per uniqueness-agent call (default `4`) |
+| `DOCUMENT_CARD_CHARS` | file prefix sent for the document card (default `12000`) |
 
-`agentic` matches the idea that the model decides section boundaries while saving. It is slower and can be inconsistent across re-ingests. Switch to `document` if ingest is too expensive.
+`recursive` is the default splitter. The metadata agent tags identity after the cut. `agentic` is slower; use it when OCR layout is too messy for recursive cuts.
+
+Old vectors do not pick up uniqueness fields. Run `uv run python main.py reingest` after this change, then restart AgentOS so the query agent loads the new search filters.
 
 ## What each agent does
 
 **Ingest**
 
 1. User points at a file, folder, or `data/incoming`.
-2. Agent calls `ingest_path`.
-3. PDF reader splits with AgenticChunking (or the strategy in `.env`).
-4. Chunks land in Chroma. Content rows land in `data/contents.db`.
+2. Agent calls `ingest_legal_tree` (preferred). Each PDF is inserted with folder tags (`folder_family`, `folder_vintage`, `folder_region`).
+3. The reader splits (recursive / agentic / document).
+4. The metadata agent builds a document card from the file, then a uniqueness card per chunk (locator, aliases, distinguisher) and prepends a search prefix before embedding.
+5. Aliases such as `KGD6 PSC` are stored for query-time filters.
 
 **Query**
 
 1. User asks a legal question.
 2. Agent calls `think` to plan searches.
-3. Agent calls `search_knowledge` (can repeat).
-4. Agent calls `analyze` to check if evidence is enough.
-5. Agent answers only from those hits.
+3. Agent calls `search_knowledge` with `query` plus optional `document`, `article`, `clause`.
+4. Named-instrument searches are filtered; zero hits return `not_in_corpus` instead of another contract.
+5. Agent calls `analyze`, then answers only from those hits.
 
-## Later (not in v1)
+## Later (not in this pass)
 
-- Stable `clause_id` / heading index
+- Parent/child chunk graph
 - `effective_from` / `effective_to` filters
 - Participating interest SQL ledger
 - Fiscal slab lookup and deadline calculator
 - Citation verifier and conflict detector
-
-Those need structured stores and extra tools. This folder is the two-agent control plane they plug into.
