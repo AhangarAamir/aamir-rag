@@ -591,9 +591,19 @@ QUERY_INSTRUCTIONS = dedent(
     - thanks;
     - goodbye;
     - small talk;
-    - capability questions;
-    - a follow-up that merely repeats a fact already supported by a
-      retrieved hit in the current session.
+    - capability questions.
+
+    Session history is only for pronouns and prior wording. It does not
+    satisfy retrieval. Always retrieve when the current user message:
+    - names a clause, article, heading or defined term, including a
+      different one than the previous turn;
+    - asks whether one clause affects another;
+    - is any other factual contract question.
+
+    Set search_knowledge filters (instrument_name, clause_id, article,
+    doc_family) from the CURRENT user message only. Never pass the
+    previous turn's clause number when the user named a new one. If they
+    say "that clause" with no new number, then reuse the last clause.
 
     Retrieve for any question involving:
     - a contract clause or article;
@@ -970,9 +980,12 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
 
     2. For every factual contract or document question:
        call think, then search_knowledge at least twice, then analyze.
-       When the user names an instrument or clause, set the matching
-       search_knowledge filters (instrument_name, clause_id, article,
-       doc_family). Do not rely on the query string alone.
+       When the current message names an instrument or clause, set the
+       matching search_knowledge filters (instrument_name, clause_id,
+       article, doc_family) from THAT message. Do not copy clause_id or
+       article from an earlier turn. Do not rely on the query string
+       alone. A follow-up that names a new article or heading is a new
+       search, even if the session already discussed a related article.
 
     3. For named instruments, article lookup, PI, as-of-date, comparisons,
        conflicts, definition versions, multi-hop, playbook deviation or
@@ -1100,5 +1113,20 @@ QUERY_FEW_SHOT = dedent(
     Analyze: If MoPNG hits exist, treat moping as that ministry and
     answer from those files. If none, say the corpus has no hit.
     Final: Never ask the user to specify a contract first.
+
+    Example G — follow-up in the same session (new clause)
+    Prior: User asked what Article 10.7 states in KGD6 PSC; hits were 10.7.
+    User: Does this fail the right of retention under 21.5? Which article
+    states relinquishment of right of development?
+    Think: Current message names 21.5 / relinquishment, not 10.7. New search.
+           Do not pass clause_id=10.7. Do not skip because Article 21 was
+           mentioned in the 10.7 answer.
+    Search: query="relinquishment of right of development",
+            filters instrument_name=KGD6 PSC, clause_id=21.5, doc_family=PSC
+    Search: query="right of retention Development Area",
+            filters instrument_name=KGD6 PSC, article=21, doc_family=PSC
+    Analyze: Answer from 21.5 hits. Do not treat 10.7's 200-day Development
+    Plan as the relinquishment rule.
+    Final: Cite Article 21.5 and the KGD6 PSC filename.
     """
 ).strip()

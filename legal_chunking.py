@@ -813,17 +813,31 @@ def build_chroma_filters(
     clause_id: str = "",
     article: str = "",
 ) -> Optional[Dict[str, Any]]:
-    filters: Dict[str, Any] = {}
+    """Build a Chroma ``where`` clause.
+
+    Chroma allows exactly one top-level operator. Two metadata keys such as
+    ``doc_family`` + ``article`` must be wrapped in ``$and``. A lone key is
+    left as a plain ``{field: value}`` so Agno can add ``$eq``.
+    """
     family = normalize_family(doc_family)
     clause = normalize_clause(clause_id)
-    art = normalize_article(article)
+    # clause_id already implies the article; sending both over-filters when
+    # stored clause_id is "21.5" and the model passed "21.5.5" + article 21.
+    art = "" if clause else normalize_article(article)
+    parts: List[Dict[str, Any]] = []
     if family:
-        filters["doc_family"] = family
+        parts.append({"doc_family": family})
     if clause:
-        filters["clause_id"] = clause
+        parts.append({"clause_id": clause})
     if art:
-        filters["article"] = art
-    return filters or None
+        parts.append({"article": art})
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0]
+    return {
+        "$and": [{key: {"$eq": value} for key, value in part.items()} for part in parts]
+    }
 
 
 def _stamp_then_chunk(
