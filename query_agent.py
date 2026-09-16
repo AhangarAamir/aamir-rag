@@ -22,6 +22,7 @@ from config import NUM_HISTORY_RUNS, OPENAI_MODEL, SEARCH_MAX_RESULTS, SESSIONS_
 from knowledge_store import get_knowledge
 from legal_chunking import build_chroma_filters, document_matches_instrument, rank_documents
 from prompts import QUERY_FEW_SHOT, QUERY_INSTRUCTIONS, QUERY_TOOL_INSTRUCTIONS
+from query_topic_shift import isolate_unrelated_query, restore_query_history
 
 
 def scratch_for_run(run_context: RunContext) -> dict:
@@ -189,6 +190,9 @@ def build_query_agent() -> Agent:
         add_session_summary_to_context=True,
         add_history_to_context=True,
         num_history_runs=NUM_HISTORY_RUNS,
+        max_tool_calls_from_history=0,
+        pre_hooks=[isolate_unrelated_query],
+        post_hooks=[restore_query_history],
         tools=[
             SharedCorpusKnowledgeTools(
                 knowledge=knowledge,

@@ -593,8 +593,14 @@ QUERY_INSTRUCTIONS = dedent(
     - small talk;
     - capability questions.
 
-    Session history is only for pronouns and prior wording. It does not
-    satisfy retrieval. Always retrieve when the current user message:
+    Some turns arrive with no prior chat in context. That means the
+    current message was judged self-contained. Answer it as a first
+    question. Do not reuse an earlier clause, instrument, party, or
+    answer.
+
+    When prior chat is present, it is only for pronouns and prior
+    wording. It does not satisfy retrieval. Always retrieve when the
+    current user message:
     - names a clause, article, heading or defined term, including a
       different one than the previous turn;
     - asks whether one clause affects another;
@@ -602,8 +608,9 @@ QUERY_INSTRUCTIONS = dedent(
 
     Set search_knowledge filters (instrument_name, clause_id, article,
     doc_family) from the CURRENT user message only. Never pass the
-    previous turn's clause number when the user named a new one. If they
-    say "that clause" with no new number, then reuse the last clause.
+    previous turn's clause number, instrument, or party unless the user
+    still refers to it (for example "that clause"). If they named a new
+    subject, search that subject as a new question.
 
     Retrieve for any question involving:
     - a contract clause or article;
@@ -982,10 +989,13 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        call think, then search_knowledge at least twice, then analyze.
        When the current message names an instrument or clause, set the
        matching search_knowledge filters (instrument_name, clause_id,
-       article, doc_family) from THAT message. Do not copy clause_id or
-       article from an earlier turn. Do not rely on the query string
-       alone. A follow-up that names a new article or heading is a new
-       search, even if the session already discussed a related article.
+       article, doc_family) from THAT message. Do not copy clause_id,
+       article, instrument_name, or party from an earlier turn. Do not
+       rely on the query string alone. A follow-up that names a new
+       article, heading, party, or topic is a new search, even if the
+       session already discussed a related subject. If the current
+       message does not refer to the previous one, ignore the previous
+       one entirely.
 
     3. For named instruments, article lookup, PI, as-of-date, comparisons,
        conflicts, definition versions, multi-hop, playbook deviation or
@@ -1128,5 +1138,15 @@ QUERY_FEW_SHOT = dedent(
     Analyze: Answer from 21.5 hits. Do not treat 10.7's 200-day Development
     Plan as the relinquishment rule.
     Final: Cite Article 21.5 and the KGD6 PSC filename.
+
+    Example H — new standalone question in the same chat
+    Prior: User asked what Article 10.7 states in KGD6 PSC.
+    User: What is the participating interest of RIL?
+    Think: Current message does not refer to 10.7 or KGD6. Brand-new question.
+           Do not pass clause_id=10.7 or instrument_name=KGD6 PSC.
+    Search: "participating interest RIL"
+    Search: "RIL assignment farm-in PI"
+    Analyze: Answer PI from PI evidence. Discard 10.7 / Development Plan hits.
+    Final: State RIL's PI with citations. Do not mention Article 10.7.
     """
 ).strip()
