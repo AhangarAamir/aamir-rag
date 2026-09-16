@@ -788,9 +788,21 @@ def rank_documents(
     instrument_name: str = "",
     clause_id: str = "",
     doc_family: str = "",
+    heading: str = "",
+    parties: str = "",
+    block: str = "",
+    content_type: str = "",
+    document_status: str = "",
+    defined_terms: str = "",
+    cross_references: str = "",
 ) -> List[Document]:
     clause = normalize_clause(clause_id)
     family = normalize_family(doc_family)
+
+    def _has(meta: Dict[str, Any], key: str, needle: str) -> bool:
+        if not needle:
+            return False
+        return needle.lower() in str(meta.get(key) or "").lower()
 
     def score(doc: Document) -> tuple:
         meta = doc.meta_data or {}
@@ -802,9 +814,57 @@ def rank_documents(
             points += 8
         if family and str(meta.get("doc_family") or "").upper() == family:
             points += 4
+        if _has(meta, "heading", heading):
+            points += 3
+        if _has(meta, "block", block):
+            points += 3
+        if _has(meta, "parties", parties):
+            points += 2
+        if _has(meta, "defined_terms", defined_terms):
+            points += 3
+        if _has(meta, "cross_references", cross_references):
+            points += 2
+        if content_type and str(meta.get("content_type") or "").lower() == content_type.lower():
+            points += 3
+        if document_status and str(meta.get("document_status") or "").lower() == document_status.lower():
+            points += 2
         return (-points, 0)
 
     return sorted(documents, key=score)
+
+
+# LegalChunkDecision fields stored on each chunk. Skip running_summary and
+# instrument_aliases: they are long joined blobs, not exact Chroma keys.
+# instrument_key is derived in _chunk_metadata from instrument_name.
+_EXACT_FILTER_FIELDS = (
+    "heading",
+    "parties",
+    "block",
+    "content_type",
+    "document_status",
+    "defined_terms",
+    "cross_references",
+)
+
+
+def _parse_optional_bool(value: Any) -> Optional[bool]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
+def _chroma_eq(part: Dict[str, Any]) -> Dict[str, Any]:
+    """Wrap a simple {field: value} as {field: {$eq: value}}; leave $or/$and."""
+    if any(key.startswith("$") for key in part):
+        return part
+    return {key: {"$eq": value} for key, value in part.items()}
 
 
 def build_chroma_filters(
@@ -812,12 +872,25 @@ def build_chroma_filters(
     doc_family: str = "",
     clause_id: str = "",
     article: str = "",
+    instrument_name: str = "",
+    heading: str = "",
+    parties: str = "",
+    block: str = "",
+    content_type: str = "",
+    document_status: str = "",
+    defined_terms: str = "",
+    cross_references: str = "",
+    ocr_uncertainty: Any = "",
 ) -> Optional[Dict[str, Any]]:
-    """Build a Chroma ``where`` clause.
+    """Build a Chroma ``where`` clause from chunker-agent metadata.
 
-    Chroma allows exactly one top-level operator. Two metadata keys such as
-    ``doc_family`` + ``article`` must be wrapped in ``$and``. A lone key is
-    left as a plain ``{field: value}`` so Agno can add ``$eq``.
+    Only LegalChunkDecision fields (plus derived ``instrument_key``) are
+    accepted. Chroma internals and origin fields such as ``_agno.*``,
+    ``chroma:document``, ``filename`` and ``running_summary`` are ignored.
+
+    Chroma allows exactly one top-level operator. Two metadata keys must be
+    wrapped in ``$and``. A lone simple key is left as ``{field: value}`` so
+    Agno can add ``$eq``.
     """
     family = normalize_family(doc_family)
     clause = normalize_clause(clause_id)
@@ -831,13 +904,41 @@ def build_chroma_filters(
         parts.append({"clause_id": clause})
     if art:
         parts.append({"article": art})
+
+    instrument = (instrument_name or "").strip()
+    if instrument:
+        inst_parts: List[Dict[str, Any]] = [{"instrument_name": instrument}]
+        key = primary_instrument_key(instrument)
+        if key:
+            inst_parts.append({"instrument_key": key})
+        if len(inst_parts) == 1:
+            parts.append(inst_parts[0])
+        else:
+            parts.append({"$or": [_chroma_eq(item) for item in inst_parts]})
+
+    extras = {
+        "heading": (heading or "").strip(),
+        "parties": (parties or "").strip(),
+        "block": (block or "").strip(),
+        "content_type": (content_type or "").strip(),
+        "document_status": (document_status or "").strip(),
+        "defined_terms": (defined_terms or "").strip(),
+        "cross_references": (cross_references or "").strip(),
+    }
+    for field in _EXACT_FILTER_FIELDS:
+        value = extras[field]
+        if value:
+            parts.append({field: value})
+
+    ocr = _parse_optional_bool(ocr_uncertainty)
+    if ocr is not None:
+        parts.append({"ocr_uncertainty": ocr})
+
     if not parts:
         return None
     if len(parts) == 1:
         return parts[0]
-    return {
-        "$and": [{key: {"$eq": value} for key, value in part.items()} for part in parts]
-    }
+    return {"$and": [_chroma_eq(part) for part in parts]}
 
 
 def _stamp_then_chunk(

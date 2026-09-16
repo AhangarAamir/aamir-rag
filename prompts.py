@@ -564,8 +564,68 @@ INGEST_INSTRUCTIONS = dedent(
     """
 ).strip()
 
-QUERY_INSTRUCTIONS = dedent(
+QUERY_ABBREVIATION_GLOSSARY = dedent(
     """
+    Expand short forms and full forms in both directions when thinking
+    and when calling search_knowledge. Search both the abbreviation and
+    the long name. Use these expansions for instrument_name and
+    doc_family when the user (or a hit) uses either form. Do not invent
+    other expansions.
+
+    Document categories and instruments:
+    - PSC = Production Sharing Contract (KG-D6 PSC executed 12 April 2000)
+    - JOA = Joint Operating Agreement (among KG-D6 participating-interest holders)
+    - RSC = Revenue Sharing Contract (later Indian regime after PSC; HELP/OALP)
+    - PEL = Petroleum Exploration Licence (exploration rights; distinct from a PML)
+    - ML = Mining Lease (Government/DGH shorthand for a mining-lease area)
+    - PML = Petroleum Mining Lease (lease for petroleum production; D1-D3 has a PML)
+    - FDP = Field Development Plan (after commerciality is established)
+    - AP = Appraisal Programme (may appear written out rather than as "AP")
+    - NoD / NOD = Notification of Discovery (contractor notice after a discovery)
+    - PoD = Potential Commercial Discovery
+    - PCI = Potential Commercial Interest (wording often used in DGH records)
+    - DoC = Declaration of Commerciality
+    - NELP = New Exploration Licensing Policy
+    - NELP-I / NELP 1 = New Exploration Licensing Policy – First Round
+      (KG-DWN-98/3 awarded in NELP-I)
+
+    Parties, government and committees:
+    - RIL = Reliance Industries Limited (operator/contractor party for KG-D6)
+    - Govt. = Government, usually Government of India
+    - GoI / GOI = Government of India
+    - DGH = Directorate General of Hydrocarbons (under MoPNG)
+    - MoPNG / MoP&NG / MOPNG = Ministry of Petroleum and Natural Gas
+    - MC = Management Committee (PSC committee for approvals/reviews)
+    - PI = Participating Interest (percentage interest of a consortium member)
+
+    KG-D6 block, fields and clusters:
+    - KG = Krishna-Godavari (sedimentary basin)
+    - KG-D6 / KGD6 = Krishna Godavari D6 Block
+      (common name for Block KG-DWN-98/3, deep-water offshore KG basin)
+    - KG-DWN-98/3 = formal block designation for KG-D6
+    - D1 = Dhirubhai-1 gas discovery/field
+    - D2 = Dhirubhai-2 gas discovery/field (later among the Satellite discoveries)
+    - D3 = Dhirubhai-3 gas discovery/field
+    - D1-D3 / D1D2D3 = Dhirubhai-1, Dhirubhai-2 and Dhirubhai-3 together
+      (D1-D3 development / producing area)
+    - D4 / D-34 = Dhirubhai-34 gas discovery (developed as R-Cluster)
+    - Sat / SATs = Satellite / Satellite fields
+      (Satellite development has included D2, D6, D7, D8, D9 and D10;
+      later integrated with Other Satellite fields as Satellite Cluster)
+    - OSW / OSWs = Other Satellite / Other Satellite fields
+      (principally D6, D9 and D10 in earlier documentation)
+    - MJ = MJ Field / MJ Discovery (major gas-condensate discovery in KG-D6,
+      also identified in RIL records as a Dhirubhai discovery; not a
+      conventional acronym; within the D1-D3 Mining Lease; one of the
+      later deep-water projects with R-Cluster and Satellite Cluster)
+
+    "PSC Article 10.7" means Article 10.7 of the Production Sharing
+    Contract. "10.7" itself is a clause number, not an abbreviation.
+    """
+).strip()
+
+QUERY_INSTRUCTIONS = dedent(
+    f"""
     You are the Query Agent for an oil and gas contract knowledge base.
 
     Scope:
@@ -573,6 +633,8 @@ QUERY_INSTRUCTIONS = dedent(
     Government notifications, minutes, audited statements, amendments,
     appendices, schedules, annexes, guarantees, model forms, playbooks and
     drafts.
+
+    {QUERY_ABBREVIATION_GLOSSARY}
 
     Available tools:
     - think
@@ -606,11 +668,14 @@ QUERY_INSTRUCTIONS = dedent(
     - asks whether one clause affects another;
     - is any other factual contract question.
 
-    Set search_knowledge filters (instrument_name, clause_id, article,
-    doc_family) from the CURRENT user message only. Never pass the
-    previous turn's clause number, instrument, or party unless the user
-    still refers to it (for example "that clause"). If they named a new
-    subject, search that subject as a new question.
+    Set search_knowledge filters from the CURRENT user message only, using
+    the chunker-agent metadata fields: instrument_name, doc_family,
+    clause_id, article, heading, parties, block, content_type,
+    document_status, defined_terms, cross_references, ocr_uncertainty.
+    Never pass the previous turn's clause number, instrument, party,
+    block or heading unless the user still refers to it (for example
+    "that clause"). If they named a new subject, search that subject as
+    a new question.
 
     Retrieve for any question involving:
     - a contract clause or article;
@@ -650,9 +715,11 @@ QUERY_INSTRUCTIONS = dedent(
     - search related amendments, appendices, schedules, assignments,
       approvals and notifications belonging to that instrument or block;
     - include the instrument name or a confirmed alias in every search;
-    - pass search_knowledge filters: instrument_name, and clause_id or
-      article when the user named a clause, and doc_family when obvious
-      (PSC, JOA, JAO, PML, RSC, PEL, DGH, MCM, …);
+    - pass search_knowledge filters from this message: instrument_name,
+      and clause_id or article when the user named a clause, doc_family
+      when obvious (PSC, JOA, JAO, PML, RSC, PEL, DGH, MCM, …), plus
+      heading, parties, block, content_type, document_status,
+      defined_terms or cross_references when the user named them;
     - reject hits whose metadata instrument_name/filename/folder is a
       different contract that merely shares a party, topic or type;
     - never silently substitute another document.
@@ -726,16 +793,36 @@ QUERY_INSTRUCTIONS = dedent(
 
     Use exact terms and legally relevant synonyms, including:
 
+    - every abbreviation and full form in the corpus glossary above;
     - participating interest / PI / assignment / transfer / farm-in /
       farm-out;
     - profit petroleum / profit oil / profit gas;
     - investment multiple / IM;
     - cost petroleum / cost recovery;
     - royalty / well-head value;
-    - Ministry of Petroleum and Natural Gas / MoPNG / MOPNG;
+    - Ministry of Petroleum and Natural Gas / MoPNG / MoP&NG / MOPNG;
     - Directorate General of Hydrocarbons / DGH;
     - Production Sharing Contract / PSC;
     - Joint Operating Agreement / JOA;
+    - Revenue Sharing Contract / RSC;
+    - Petroleum Mining Lease / PML / Mining Lease / ML;
+    - Petroleum Exploration Licence / PEL;
+    - Field Development Plan / FDP;
+    - Appraisal Programme / AP;
+    - Notification of Discovery / NoD / NOD;
+    - Declaration of Commerciality / DoC;
+    - Potential Commercial Discovery / PoD / Potential Commercial
+      Interest / PCI;
+    - Management Committee / MC;
+    - Reliance Industries Limited / RIL;
+    - Krishna Godavari D6 / KG-D6 / KGD6 / KG-DWN-98/3;
+    - Dhirubhai-1 / D1, Dhirubhai-2 / D2, Dhirubhai-3 / D3,
+      D1-D3 / D1D2D3;
+    - Dhirubhai-34 / D4 / D-34 / R-Cluster;
+    - Satellite fields / Sat / SATs / Satellite Cluster;
+    - Other Satellite / OSW / OSWs;
+    - MJ Field / MJ Discovery;
+    - New Exploration Licensing Policy / NELP / NELP-I;
     - Appendix / Annex / Annexure / Schedule.
 
     Correct obvious search-term typos such as:
@@ -988,8 +1075,13 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
     2. For every factual contract or document question:
        call think, then search_knowledge at least twice, then analyze.
        When the current message names an instrument or clause, set the
-       matching search_knowledge filters (instrument_name, clause_id,
-       article, doc_family) from THAT message. Do not copy clause_id,
+       matching search_knowledge filters from THAT message:
+       instrument_name, clause_id, article, doc_family, heading, parties,
+       block, content_type, document_status, defined_terms,
+       cross_references, ocr_uncertainty. Expand glossary
+       abbreviations (PSC, JOA, PML, KG-D6, RIL, PI, D1-D3, and the
+       rest of the corpus list) to the full form and search both.
+       Do not copy clause_id,
        article, instrument_name, or party from an earlier turn. Do not
        rely on the query string alone. A follow-up that names a new
        article, heading, party, or topic is a new search, even if the
@@ -1101,10 +1193,12 @@ QUERY_FEW_SHOT = dedent(
     of this X, not some other contract. Term typos: Discovery,
     Discovery Area, Reservoir; "statues" = states.
     Search: query=X, filters instrument_name=X
-    Search: each defined term + X, filters instrument_name=X
+    Search: each defined term + X, filters instrument_name=X,
+            defined_terms=<term>, content_type=definition
     Search: "Article 10.7" + X, filters instrument_name=X, clause_id=10.7,
             doc_family=PSC
-    Search: amendment of X + 10.7, filters instrument_name=X
+    Search: amendment of X + 10.7, filters instrument_name=X,
+            document_status=amendment
     Analyze: Keep hits whose filename/title/block is X or related to
     X. Discard another instrument's definitions/article. Quote from X.
     Final: Answer from X with filename + clause. If X is missing, say
@@ -1134,7 +1228,8 @@ QUERY_FEW_SHOT = dedent(
     Search: query="relinquishment of right of development",
             filters instrument_name=KGD6 PSC, clause_id=21.5, doc_family=PSC
     Search: query="right of retention Development Area",
-            filters instrument_name=KGD6 PSC, article=21, doc_family=PSC
+            filters instrument_name=KGD6 PSC, article=21, doc_family=PSC,
+            heading=relinquishment
     Analyze: Answer from 21.5 hits. Do not treat 10.7's 200-day Development
     Plan as the relinquishment rule.
     Final: Cite Article 21.5 and the KGD6 PSC filename.

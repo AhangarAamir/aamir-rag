@@ -101,6 +101,14 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
         doc_family: str = "",
         clause_id: str = "",
         article: str = "",
+        heading: str = "",
+        parties: str = "",
+        block: str = "",
+        content_type: str = "",
+        document_status: str = "",
+        defined_terms: str = "",
+        cross_references: str = "",
+        ocr_uncertainty: str = "",
     ) -> str:
         """Search ingested instruments. Call only when the question needs evidence.
 
@@ -108,26 +116,56 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
             query: Search text for the CURRENT user message. Do not paste an
                 earlier turn's clause number into this string.
             instrument_name: Named contract from this message, e.g. KGD6 PSC.
-                Hits from other contracts are ranked down.
+                Matches instrument_name or derived instrument_key.
             doc_family: Catalog family such as PSC, JOA, JAO, PML, RSC, PEL.
             clause_id: Clause named in this message, e.g. 21.5. Never reuse
                 a previous turn's clause unless the user still means it.
             article: Article named in this message, e.g. 21.
+            heading: Exact or stored heading, e.g. Assignment of Interest.
+            parties: Party named in this message, e.g. RIL.
+            block: Block or contract area, e.g. KG-D6 or NEC-OSN-97-2.
+            content_type: clause, definition, table, toc, preamble,
+                schedule, annex, or other.
+            document_status: executed, draft, amendment, notification,
+                minutes, playbook, or unknown.
+            defined_terms: Defined term from this message, e.g. Petroleum.
+            cross_references: Referenced article/schedule named here.
+            ocr_uncertainty: "true" only when the user asks about OCR-uncertain
+                text. Leave empty otherwise.
         """
         try:
             instrument_name = (instrument_name or "").strip()
             doc_family = (doc_family or "").strip()
             clause_id = (clause_id or "").strip()
             article = (article or "").strip()
+            heading = (heading or "").strip()
+            parties = (parties or "").strip()
+            block = (block or "").strip()
+            content_type = (content_type or "").strip()
+            document_status = (document_status or "").strip()
+            defined_terms = (defined_terms or "").strip()
+            cross_references = (cross_references or "").strip()
+            ocr_uncertainty = (ocr_uncertainty or "").strip()
             search_query = (query or "").strip()
             if not search_query:
                 search_query = " ".join(
-                    part for part in (instrument_name, clause_id or article) if part
+                    part
+                    for part in (instrument_name, clause_id or article, heading, block)
+                    if part
                 )
             filters = build_chroma_filters(
                 doc_family=doc_family,
                 clause_id=clause_id,
                 article=article,
+                instrument_name=instrument_name,
+                heading=heading,
+                parties=parties,
+                block=block,
+                content_type=content_type,
+                document_status=document_status,
+                defined_terms=defined_terms,
+                cross_references=cross_references,
+                ocr_uncertainty=ocr_uncertainty,
             )
             log_debug(
                 f"Searching knowledge base: {search_query!r} filters={filters} "
@@ -145,6 +183,13 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
                 instrument_name=instrument_name,
                 clause_id=clause_id,
                 doc_family=doc_family,
+                heading=heading,
+                parties=parties,
+                block=block,
+                content_type=content_type,
+                document_status=document_status,
+                defined_terms=defined_terms,
+                cross_references=cross_references,
             )
             if instrument_name:
                 scoped = [
