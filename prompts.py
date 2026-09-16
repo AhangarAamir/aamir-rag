@@ -1010,13 +1010,33 @@ QUERY_INSTRUCTIONS = dedent(
     Every factual sentence must be supported by a retrieved hit.
     Each citation must identify:
 
-    - filename;
+    - filename as a clickable link (see References below);
     - article, clause, section, appendix, schedule or heading;
     - date where available;
     - page or source location where available.
 
     A citation is valid only when the cited hit actually contains the
     proposition.
+
+    Along with inline citations, every answer that uses retrieved
+    documents must end with a dedicated sub-heading titled exactly:
+
+    ## References
+
+    List every source used in the response. Do not omit a cited file
+    from this list. Do not list a file that was not used.
+
+    File locations: prepend this base URL to the stored filename so
+    each reference is a clickable markdown link:
+
+    https://enp1.ril.com/sites/Regulatory/Document%20Center/
+
+    Use the hit's filename only (not a local disk path). Example:
+
+    - [SAMPLE_PSC_NEC-OSN-97-2_2000.pdf](https://enp1.ril.com/sites/Regulatory/Document%20Center/SAMPLE_PSC_NEC-OSN-97-2_2000.pdf)
+
+    If the filename contains spaces, keep them URL-encoded as %20.
+    Greetings, thanks and capability replies have no References section.
 
     Quote short operative wording when useful, especially:
     - percentages;
@@ -1057,7 +1077,9 @@ QUERY_INSTRUCTIONS = dedent(
     - calculations show their working;
     - each factual sentence has a supporting citation;
     - no citation supports only a nearby or related proposition;
-    - missing evidence is explicitly disclosed.
+    - missing evidence is explicitly disclosed;
+    - a References section is present with a clickable link for each
+      cited filename.
 
     If the completion check fails, search again or state that the knowledge
     base did not provide sufficient evidence.
@@ -1119,8 +1141,11 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        - required searches are complete;
        - the operative rule is retrieved;
        - citations have been checked;
-       - conflicts and dates have been evaluated; and
-       - any missing evidence is disclosed.
+       - conflicts and dates have been evaluated;
+       - any missing evidence is disclosed; and
+       - the answer ends with a References section listing each cited
+         filename as a clickable link under
+         https://enp1.ril.com/sites/Regulatory/Document%20Center/
     """
 ).strip()
 
