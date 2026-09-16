@@ -1010,7 +1010,7 @@ QUERY_INSTRUCTIONS = dedent(
     Every factual sentence must be supported by a retrieved hit.
     Each citation must identify:
 
-    - filename as a clickable link (see References below);
+    - folder_path/filename as a clickable link (see References below);
     - article, clause, section, appendix, schedule or heading;
     - date where available;
     - page or source location where available.
@@ -1026,16 +1026,48 @@ QUERY_INSTRUCTIONS = dedent(
     List every source used in the response. Do not omit a cited file
     from this list. Do not list a file that was not used.
 
-    File locations: prepend this base URL to the stored filename so
-    each reference is a clickable markdown link:
+    File locations: after the base URL, use the Document Center folder
+    tree, then the file. The folders immediately after the link are:
+
+    - JOA
+    - JAO
+    - PEL
+    - PML
+    - PSC
+    - RSC
+
+    Keep every nested folder under that main folder. Do not flatten.
+    Do not use a local disk path.
+
+    Base URL:
 
     https://enp1.ril.com/sites/Regulatory/Document%20Center/
 
-    Use the hit's filename only (not a local disk path). Example:
+    Build the relative path from the hit's folder_path and filename.
+    Concatenate: base URL + full folder hierarchy + "/" + filename.
+    Encode spaces as %20.
 
-    - [SAMPLE_PSC_NEC-OSN-97-2_2000.pdf](https://enp1.ril.com/sites/Regulatory/Document%20Center/SAMPLE_PSC_NEC-OSN-97-2_2000.pdf)
+    Hierarchy examples:
 
-    If the filename contains spaces, keep them URL-encoded as %20.
+    JOA
+      NEW JOA
+        file.pdf
+    → https://enp1.ril.com/sites/Regulatory/Document%20Center/JOA/NEW%20JOA/file.pdf
+      [JOA/NEW JOA/file.pdf](https://enp1.ril.com/sites/Regulatory/Document%20Center/JOA/NEW%20JOA/file.pdf)
+
+    PEL
+      file.pdf
+    → https://enp1.ril.com/sites/Regulatory/Document%20Center/PEL/file.pdf
+      [PEL/file.pdf](https://enp1.ril.com/sites/Regulatory/Document%20Center/PEL/file.pdf)
+
+    PML
+      OLD PML
+        file.pdf
+    → https://enp1.ril.com/sites/Regulatory/Document%20Center/PML/OLD%20PML/file.pdf
+      [PML/OLD PML/file.pdf](https://enp1.ril.com/sites/Regulatory/Document%20Center/PML/OLD%20PML/file.pdf)
+
+    Same pattern for PSC and RSC: link/PSC/.../file.pdf or
+    link/RSC/file.pdf when the file sits in the main folder.
     Greetings, thanks and capability replies have no References section.
 
     Quote short operative wording when useful, especially:
@@ -1079,7 +1111,8 @@ QUERY_INSTRUCTIONS = dedent(
     - no citation supports only a nearby or related proposition;
     - missing evidence is explicitly disclosed;
     - a References section is present with a clickable link for each
-      cited filename.
+      cited file using the full Document Center folder tree
+      (JOA/NEW JOA/file.pdf, PEL/file.pdf, PML/OLD PML/file.pdf).
 
     If the completion check fails, search again or state that the knowledge
     base did not provide sufficient evidence.
@@ -1144,8 +1177,10 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        - conflicts and dates have been evaluated;
        - any missing evidence is disclosed; and
        - the answer ends with a References section listing each cited
-         filename as a clickable link under
+         file as the Document Center path after
          https://enp1.ril.com/sites/Regulatory/Document%20Center/
+         for example JOA/NEW JOA/file.pdf, PEL/file.pdf, or
+         PML/OLD PML/file.pdf
     """
 ).strip()
 
