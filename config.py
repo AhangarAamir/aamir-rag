@@ -34,6 +34,34 @@ QUERY_SESSION_ID = os.getenv("QUERY_SESSION_ID", "legal-query-default")
 NUM_HISTORY_RUNS = int(os.getenv("NUM_HISTORY_RUNS", "5"))
 SESSIONS_DB_FILE = DATA_DIR / "sessions.db"
 
+HOST = os.getenv("HOST") or os.getenv("AGENT_OS_HOST") or "127.0.0.1"
+PORT = int(os.getenv("PORT") or os.getenv("AGENT_OS_PORT") or "8000")
+
+_DEFAULT_CORS_ORIGINS = (
+    "https://uracs.enp.ril.com",
+    "https://uracs.ucg.ril.com",
+)
+
+
+def _parse_cors_origins(raw: str | None) -> list[str]:
+    """Comma-separated origins. Bare hostnames get an https:// prefix."""
+    values = _DEFAULT_CORS_ORIGINS if raw is None else raw.split(",")
+    origins: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        origin = value.strip().rstrip("/")
+        if not origin:
+            continue
+        if "://" not in origin:
+            origin = f"https://{origin}"
+        if origin not in seen:
+            seen.add(origin)
+            origins.append(origin)
+    return origins
+
+
+CORS_ALLOWED_ORIGINS = _parse_cors_origins(os.getenv("CORS_ALLOWED_ORIGINS"))
+
 
 def _quiet_openai_httpx_finalizers() -> None:
     """OpenAI 3.x wraps httpx2. Client GC calls __del__ -> is_closed -> _state.

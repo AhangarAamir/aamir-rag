@@ -78,7 +78,7 @@ cd ..
 uv run python agent_os.py
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) when you start with `agent_os.py` (port 8000). `uv run python main.py os` uses AgentOS’s default port 7777. The page calls `POST /agents/query-agent/runs` (SSE) and lists this browser's chats via `GET /sessions`. A new chat uses a new `session_id`; a different browser gets a different `user_id` in `localStorage`.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) by default (`HOST` / `PORT` in `.env`). `agent_os.py` and `uv run python main.py os` use the same bind address. The page calls `POST /agents/query-agent/runs` (SSE) and lists this browser's chats via `GET /sessions`. A new chat uses a new `session_id`; a different browser gets a different `user_id` in `localStorage`.
 
 For live React work while AgentOS is running:
 
@@ -110,6 +110,9 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | `CHUNKER_ASYNC` | `true` (default): recursive split + parallel `agent.arun` labels |
 | `CHUNKER_CONCURRENCY` | parallel metadata calls per document (default `8`) |
 | `SEARCH_MAX_RESULTS` | hits returned by `search_knowledge` (default `12`) |
+| `HOST` | bind address for AgentOS (default `127.0.0.1`; alias `AGENT_OS_HOST`) |
+| `PORT` | bind port for AgentOS (default `8000`; alias `AGENT_OS_PORT`) |
+| `CORS_ALLOWED_ORIGINS` | comma-separated browser origins (default `https://uracs.enp.ril.com`, `https://uracs.ucg.ril.com`) |
 
 `agentic` uses the custom legal chunker. Default is async: local recursive split, one identity call, then parallel metadata labeling. Set `CHUNKER_ASYNC=false` for the old sequential window walk. Switch to `document` if ingest is still too expensive.
 

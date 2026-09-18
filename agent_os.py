@@ -3,7 +3,7 @@
 Run: `uv run python agent_os.py`  or  `uv run python main.py os`
 
 Build the UI first: `cd ui && npm install && npm run build`
-Then open http://127.0.0.1:8000
+Then open http://127.0.0.1:8000 (or HOST:PORT from .env)
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import DATA_DIR, require_api_key
+from config import CORS_ALLOWED_ORIGINS, DATA_DIR, HOST, PORT, require_api_key
 from ingest_agent import build_ingest_agent
 from knowledge_store import get_knowledge
 from query_agent import build_query_agent
@@ -68,9 +68,10 @@ agent_os = AgentOS(
     db=SqliteDb(id="agentos-db", db_file=str(DATA_DIR / "agentos.db")),
     base_app=base_app,
     on_route_conflict="preserve_base_app",
+    cors_allowed_origins=CORS_ALLOWED_ORIGINS or ["https://cors-disabled.invalid"],
 )
 app = agent_os.get_app()
 
 
 if __name__ == "__main__":
-    agent_os.serve(app="agent_os:app", reload=True, port=8000)
+    agent_os.serve(app="agent_os:app", reload=True, host=HOST, port=PORT)

@@ -25,8 +25,9 @@ def main() -> None:
 
     if mode in {"os", "serve", "agentos"}:
         from agent_os import agent_os
+        from config import HOST, PORT
 
-        agent_os.serve(app="agent_os:app", reload=True)
+        agent_os.serve(app="agent_os:app", reload=True, host=HOST, port=PORT)
         return
 
     print("Legal RAG (Agno)")
