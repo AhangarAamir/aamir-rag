@@ -182,6 +182,9 @@ _ALIAS_INDEX: Tuple[Tuple[str, DocumentCollection], ...] = tuple(
     )
 )
 
+# Incoming-folder families shown on the observability query-mix chart.
+QUERY_MIX_CODES: Tuple[str, ...] = ("JOA", "PEL", "PML", "PSC", "RSC")
+
 # Instrument / folder families beat status words like "amendment" in a JOA filename.
 _PRIMARY_CODES = {
     "PSC",

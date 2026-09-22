@@ -171,6 +171,17 @@
 
 .plot-host {
   width: 100%;
+  position: relative;
+}
+
+.plot-host .modebar {
+  top: 2px !important;
+  right: 2px !important;
+  opacity: 1 !important;
+}
+
+.plot-host .modebar-btn path {
+  fill: #9fb4cc !important;
 }
 
 .model-table {

@@ -5,7 +5,7 @@ const BASE_LAYOUT = {
   paper_bgcolor: "rgba(0,0,0,0)",
   plot_bgcolor: "rgba(0,0,0,0)",
   font: { color: "#9fb4cc", family: "ui-sans-serif, system-ui, sans-serif", size: 11 },
-  margin: { t: 28, r: 18, b: 40, l: 48 },
+  margin: { t: 36, r: 18, b: 40, l: 48 },
   xaxis: {
     gridcolor: "rgba(255,255,255,0.06)",
     zeroline: false,
@@ -22,29 +22,70 @@ const BASE_LAYOUT = {
   hoverlabel: { bgcolor: "#12233a", bordercolor: "#1e3a5a", font: { color: "#e8f1fb" } },
 };
 
-export default function PlotChart({ data, layout, modeBar = false, height = 240 }) {
+function axisTitle(title) {
+  if (title == null || title === "") return title;
+  if (typeof title === "string") {
+    return { text: title, font: { color: "#d7e6f7", size: 12 }, standoff: 8 };
+  }
+  return { font: { color: "#d7e6f7", size: 12 }, standoff: 8, ...title };
+}
+
+function withAxis(base, extra) {
+  const axis = { ...base, ...(extra || {}) };
+  if (axis.title != null && axis.title !== "") {
+    axis.title = axisTitle(axis.title);
+  }
+  return axis;
+}
+
+function mergedLayout(layout, height) {
+  const next = {
+    ...BASE_LAYOUT,
+    height,
+    dragmode: "zoom",
+    ...layout,
+    xaxis: withAxis(BASE_LAYOUT.xaxis, layout.xaxis),
+    yaxis: withAxis(BASE_LAYOUT.yaxis, layout.yaxis),
+  };
+  if (layout.yaxis2) {
+    next.yaxis2 = withAxis(
+      {
+        zeroline: false,
+        linecolor: "rgba(255,255,255,0.08)",
+        tickfont: { color: "#7f96b0" },
+      },
+      layout.yaxis2,
+    );
+  }
+  return next;
+}
+
+export default function PlotChart({ data, layout = {}, modeBar = true, height = 240 }) {
   const el = useRef(null);
+  const layoutKey = JSON.stringify(layout);
 
   useEffect(() => {
     if (!el.current) return;
-    Plotly.react(
-      el.current,
-      data,
-      { ...BASE_LAYOUT, height, ...layout },
-      {
-        displayModeBar: modeBar,
-        displaylogo: false,
-        responsive: true,
-        modeBarButtonsToRemove: ["sendDataToCloud", "lasso2d", "select2d"],
-      },
-    );
-    const onResize = () => Plotly.Plots.resize(el.current);
+    Plotly.react(el.current, data, mergedLayout(layout, height), {
+      displayModeBar: modeBar,
+      displaylogo: false,
+      responsive: true,
+      scrollZoom: true,
+      modeBarButtonsToRemove: ["sendDataToCloud"],
+    });
+  }, [data, layout, layoutKey, modeBar, height]);
+
+  useEffect(() => {
+    const node = el.current;
+    const onResize = () => {
+      if (node) Plotly.Plots.resize(node);
+    };
     window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("resize", onResize);
-      if (el.current) Plotly.purge(el.current);
+      if (node) Plotly.purge(node);
     };
-  }, [data, layout, modeBar, height]);
+  }, []);
 
   return <div ref={el} className="plot-host" />;
 }

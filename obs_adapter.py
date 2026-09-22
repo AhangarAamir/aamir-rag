@@ -15,7 +15,7 @@ from agno.run.agent import RunOutput
 from agno.utils.log import log_warning
 
 from config import DATA_DIR, OPENAI_MODEL, SESSIONS_DB_FILE
-from document_catalog import identify_collection
+from document_catalog import QUERY_MIX_CODES, identify_collection
 from obs_pricing import estimate_cost, model_rates, refresh_prices
 from obs_store import get_run, iso, list_run_ids, replace_spans, upsert_run
 
@@ -52,25 +52,11 @@ def resolve_model_id(run_output: RunOutput, agent: Optional[Agent] = None) -> st
 
 
 def classify_query_class(text: str, agent_id: str | None = None) -> str:
-    if agent_id == "ingest-agent":
-        return "ingest"
+    """Return a document-family code (JOA/PEL/PML/PSC/RSC) or empty if unknown."""
     hit = identify_collection(text or "")
-    if hit:
+    if hit and hit.code in QUERY_MIX_CODES:
         return hit.code
-    lowered = (text or "").lower()
-    if "participating interest" in lowered or " working interest" in lowered:
-        return "PI / economics"
-    if "workover" in lowered:
-        return "workover"
-    if "gain/loss" in lowered or "gain or loss" in lowered:
-        return "gain/loss/cost"
-    if "export" in lowered or "report" in lowered:
-        return "export/report"
-    if "production" in lowered:
-        return "actual production"
-    if "econom" in lowered or "royalt" in lowered:
-        return "economics"
-    return "legal query"
+    return ""
 
 
 def _input_text(run_output: RunOutput) -> str:

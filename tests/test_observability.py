@@ -15,20 +15,20 @@ from obs_store import add_comment, configure_db, iso, list_runs, upsert_run
 
 
 class ClassifyTests(unittest.TestCase):
-    def test_ingest_route(self):
-        self.assertEqual(classify_query_class("any", "ingest-agent"), "ingest")
+    def test_ingest_path_uses_folder_type(self):
+        self.assertEqual(classify_query_class("ingest data/incoming/PSC/foo.pdf"), "PSC")
+
+    def test_unclassified_text_is_empty(self):
+        self.assertEqual(classify_query_class("any", "ingest-agent"), "")
 
     def test_joa_from_text(self):
         self.assertEqual(classify_query_class("What does the JOA say about operators?"), "JOA")
 
-    def test_pi_economics(self):
-        self.assertEqual(
-            classify_query_class("What is the participating interest of RIL?"),
-            "PI / economics",
-        )
+    def test_pi_without_family_is_empty(self):
+        self.assertEqual(classify_query_class("What is the participating interest of RIL?"), "")
 
-    def test_default_legal_query(self):
-        self.assertEqual(classify_query_class("Hello"), "legal query")
+    def test_default_is_not_legal_query(self):
+        self.assertEqual(classify_query_class("Hello"), "")
 
 
 class CostTests(unittest.TestCase):
@@ -292,7 +292,14 @@ class StoreSummaryTests(unittest.TestCase):
         names = {row["name"] for row in summary["routes"]}
         self.assertEqual(names, {"query-agent", "ingest-agent"})
         classes = {row["name"] for row in summary["query_mix"]}
-        self.assertEqual(classes, {"JOA", "ingest"})
+        self.assertEqual(classes, {"JOA", "PEL", "PML", "PSC", "RSC"})
+        self.assertNotIn("ingest", classes)
+        self.assertNotIn("legal query", classes)
+        joa = next(row for row in summary["query_mix"] if row["name"] == "JOA")
+        self.assertEqual(joa["count"], 1)
+        self.assertEqual(sum(row["count"] for row in summary["query_mix"]), 1)
+        self.assertAlmostEqual(summary["scatter"][0]["latency_s"], 21.0)
+        self.assertEqual(summary["slowest_class"], "JOA")
         self.assertEqual(summary["slowest_route"], "ingest-agent")
         self.assertGreater(summary["p95_ms"], summary["avg_ms"])
         self.assertIn("cost_input", summary["days_series"][0])
@@ -317,7 +324,7 @@ class ApiTests(StoreSummaryTests):
         self.assertEqual(data["runs"], 2)
         self.assertEqual(data["ok"], 1)
         self.assertEqual(data["fail"], 1)
-        self.assertGreaterEqual(len(data["query_mix"]), 2)
+        self.assertEqual({row["name"] for row in data["query_mix"]}, {"JOA", "PEL", "PML", "PSC", "RSC"})
         self.assertEqual(data["pricing"]["selected_model"], OPENAI_MODEL)
 
     def test_pricing_http(self):

@@ -10,7 +10,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from obs_adapter import import_session_runs
+from obs_adapter import classify_query_class, import_session_runs
+from document_catalog import QUERY_MIX_CODES
 from obs_pricing import catalog_status, model_rates, pricing_source
 from obs_store import add_comment, list_apps, list_comments, list_runs, utc_now, window_start
 
@@ -110,13 +111,19 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
         bucket["cost_cached"] += cached_tok * cached_rate / 1_000_000.0
         bucket["cost_output"] += out_tok * out_rate / 1_000_000.0
 
-        cls = row.get("query_class") or "unknown"
-        by_class[cls]["count"] += 1
-        if status == "ok":
-            by_class[cls]["ok"] += 1
-        if row.get("duration_ms") is not None:
-            by_class[cls]["duration_sum"] += float(row["duration_ms"])
-            by_class[cls]["duration_n"] += 1
+        cls = classify_query_class(row.get("input_text") or "", row.get("agent_id"))
+        if not cls:
+            stored = row.get("query_class") or ""
+            cls = stored if stored in QUERY_MIX_CODES else ""
+        if not cls:
+            cls = None
+        if cls:
+            by_class[cls]["count"] += 1
+            if status == "ok":
+                by_class[cls]["ok"] += 1
+            if row.get("duration_ms") is not None:
+                by_class[cls]["duration_sum"] += float(row["duration_ms"])
+                by_class[cls]["duration_n"] += 1
 
         route = row.get("route") or row.get("agent_id") or "unknown"
         by_route[route]["count"] += 1
@@ -137,6 +144,7 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
             {
                 "tokens": int(row["total_tokens"] or 0)
                 or (int(row["input_tokens"] or 0) + int(row["output_tokens"] or 0)),
+                "latency_s": float(row["duration_ms"] or 0) / 1000.0,
                 "latency_ms": float(row["duration_ms"] or 0),
                 "run_id": row["run_id"],
                 "route": route,
@@ -199,7 +207,8 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
         )
 
     query_mix = []
-    for name, stats in sorted(by_class.items(), key=lambda item: item[1]["count"], reverse=True):
+    for name in QUERY_MIX_CODES:
+        stats = by_class.get(name) or {"count": 0, "ok": 0, "duration_sum": 0.0, "duration_n": 0}
         query_mix.append(
             {
                 "name": name,
@@ -208,6 +217,7 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
                 "avg_ms": (stats["duration_sum"] / stats["duration_n"]) if stats["duration_n"] else 0.0,
             }
         )
+    query_mix.sort(key=lambda row: row["count"])
 
     routes = []
     for name, stats in sorted(by_route.items(), key=lambda item: item[1]["count"], reverse=True):

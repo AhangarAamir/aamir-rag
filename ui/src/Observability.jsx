@@ -96,7 +96,7 @@ export default function Observability() {
     [series, x],
   );
 
-  const mix = [...(data?.query_mix || [])].slice().reverse();
+  const mix = data?.query_mix || [];
   const mixChart = useMemo(
     () => [
       {
@@ -159,10 +159,12 @@ export default function Observability() {
       {
         type: "scatter",
         mode: "markers",
+        name: "run",
         x: (data?.scatter || []).map((row) => row.tokens),
-        y: (data?.scatter || []).map((row) => row.latency_ms),
+        y: (data?.scatter || []).map((row) => row.latency_s ?? (row.latency_ms || 0) / 1000),
         marker: { color: BLUE, size: 9, opacity: 0.85 },
         text: (data?.scatter || []).map((row) => row.route),
+        hovertemplate: "Tokens: %{x:,}<br>Latency: %{y:.1f} s<br>%{text}<extra></extra>",
       },
     ],
     [data],
@@ -372,7 +374,7 @@ export default function Observability() {
           <article className="obs-card">
             <div className="card-head">
               <h2>Query mix</h2>
-              <span className="kpi-meta">{mix.length} classes</span>
+              <span className="kpi-meta">JOA · PEL · PML · PSC · RSC</span>
             </div>
             <PlotChart
               data={mixChart}
@@ -394,7 +396,7 @@ export default function Observability() {
             <PlotChart
               modeBar
               data={latencyChart}
-              layout={{ yaxis: { title: "ms" } }}
+              layout={{ yaxis: { title: "Latency (ms)" } }}
             />
           </article>
           <article className="obs-card">
@@ -417,13 +419,18 @@ export default function Observability() {
           <article className="obs-card">
             <div className="card-head">
               <h2>Tokens vs latency</h2>
-              <span className="kpi-meta">{data?.scatter?.length || 0} points</span>
+              <span className="kpi-meta">X = tokens · Y = latency (s)</span>
             </div>
             <PlotChart
               data={scatterChart}
               layout={{
-                xaxis: { title: "tokens" },
-                yaxis: { title: "latency ms" },
+                margin: { t: 40, r: 36, b: 64, l: 80 },
+                xaxis: { title: "Tokens", rangemode: "tozero" },
+                yaxis: {
+                  title: "Latency (seconds)",
+                  rangemode: "tozero",
+                  ticksuffix: " s",
+                },
                 showlegend: false,
               }}
             />
