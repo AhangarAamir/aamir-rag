@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 
-from obs_adapter import classify_query_class, estimate_cost, resolve_model_id
+from obs_adapter import classify_query_class, estimate_cost, resolve_model_id, status_from_raw
 from obs_api import _build_summary
 from config import OPENAI_MODEL
 from obs_store import add_comment, configure_db, iso, list_runs, upsert_run
@@ -112,8 +112,114 @@ class ModelResolveTests(unittest.TestCase):
         )
 
 
+class StatusTests(unittest.TestCase):
+    def test_post_hook_running_is_ok(self):
+        self.assertEqual(status_from_raw("RUNNING", post_hook=True), "ok")
+        self.assertEqual(status_from_raw("COMPLETED", post_hook=True), "ok")
+
+    def test_session_running_stays_run(self):
+        self.assertEqual(status_from_raw("RUNNING"), "run")
+        self.assertEqual(status_from_raw("COMPLETED"), "ok")
+        self.assertEqual(status_from_raw("ERROR"), "fail")
+
+
+class SessionImportTests(unittest.TestCase):
+    def setUp(self):
+        import obs_adapter
+
+        self.tmp = TemporaryDirectory()
+        configure_db(Path(self.tmp.name) / "obs.db")
+        self.sessions = Path(self.tmp.name) / "sessions.db"
+        conn = __import__("sqlite3").connect(self.sessions)
+        conn.execute(
+            """
+            CREATE TABLE query_sessions_runs (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                agent_id TEXT,
+                user_id TEXT,
+                status TEXT,
+                run_data TEXT NOT NULL,
+                created_at INTEGER,
+                updated_at INTEGER
+            )
+            """
+        )
+        payload = {
+            "run_id": "hist-1",
+            "agent_id": "query-agent",
+            "agent_name": "Query Agent",
+            "session_id": "s-hist",
+            "model": "gpt-5.6-luna",
+            "status": "COMPLETED",
+            "created_at": 1790000000,
+            "content": "The operator is RIL.",
+            "input": {"input_content": "What does the JOA say about the operator?"},
+            "metrics": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "cache_read_tokens": 0,
+                "total_tokens": 120,
+                "duration": 2.5,
+            },
+            "tools": [
+                {
+                    "tool_call_id": "t1",
+                    "tool_name": "think",
+                    "tool_args": {"thought": "plan"},
+                    "tool_call_error": False,
+                    "created_at": 1790000001,
+                    "metrics": {"duration": 0.01},
+                }
+            ],
+        }
+        conn.execute(
+            """
+            INSERT INTO query_sessions_runs (
+                run_id, session_id, agent_id, user_id, status, run_data, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "hist-1",
+                "s-hist",
+                "query-agent",
+                "u1",
+                "COMPLETED",
+                __import__("json").dumps(payload),
+                1790000000,
+                1790000003,
+            ),
+        )
+        conn.commit()
+        conn.close()
+        obs_adapter._SESSION_WATERMARK.clear()
+        self._prev_import = obs_adapter.SESSION_IMPORT_ENABLED
+        obs_adapter.SESSION_IMPORT_ENABLED = True
+
+    def tearDown(self):
+        import obs_adapter
+
+        obs_adapter.SESSION_IMPORT_ENABLED = self._prev_import
+        self.tmp.cleanup()
+
+    def test_imports_completed_session_run(self):
+        from obs_adapter import import_session_runs
+
+        count = import_session_runs([self.sessions])
+        self.assertEqual(count, 1)
+        rows = list_runs(datetime(2020, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["run_id"], "hist-1")
+        self.assertEqual(rows[0]["status"], "ok")
+        self.assertEqual(rows[0]["query_class"], "JOA")
+        self.assertEqual(rows[0]["input_tokens"], 100)
+
+
 class StoreSummaryTests(unittest.TestCase):
     def setUp(self):
+        import obs_adapter
+
+        obs_adapter.SESSION_IMPORT_ENABLED = False
         self.tmp = TemporaryDirectory()
         configure_db(Path(self.tmp.name) / "obs.db")
         start = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)

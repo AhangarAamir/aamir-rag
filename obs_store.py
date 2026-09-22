@@ -224,6 +224,25 @@ def list_apps() -> list[str]:
     return apps or ["legal-rag"]
 
 
+def get_run(run_id: str) -> dict[str, Any] | None:
+    with _LOCK:
+        conn = _connect()
+        row = conn.execute("SELECT * FROM obs_runs WHERE run_id = ?", (run_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_run_ids(status: str | None = None) -> list[str]:
+    sql = "SELECT run_id FROM obs_runs"
+    params: list[Any] = []
+    if status:
+        sql += " WHERE status = ?"
+        params.append(status)
+    with _LOCK:
+        conn = _connect()
+        rows = conn.execute(sql, params).fetchall()
+    return [row["run_id"] for row in rows]
+
+
 def list_runs(
     since: datetime,
     app: str | None = None,

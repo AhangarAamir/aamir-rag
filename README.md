@@ -131,7 +131,7 @@ The query UI also has an **Observability** link in the sidebar. The page shows r
 
 Cost is estimated from token counts × USD / 1M rates. OpenAI does not expose a pricing API (`GET /v1/models` has no prices). At startup the app fetches the [LiteLLM model-price catalog](https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json), caches it under `data/model_prices.json`, and looks up `OPENAI_MODEL`. If that fetch fails it uses the cache, then a small built-in table (including official `gpt-5.6-luna` rates: **$0.20 / $0.02 / $1.20** per 1M). Changing `OPENAI_MODEL` in `.env` picks up the new model's rates on the next start. If a run includes provider `metrics.cost`, that value wins over the table.
 
-Data is local SQLite only. Inner agents (`legal-chunker`, `query-topic-shift`) are skipped unless `OBS_TRACE_INNER=true`.
+The dashboard reads `data/observability.db`. On load it also imports completed runs from `data/sessions.db` (the existing Agno session store), so older chats show up after deploy. Streaming post-hooks fire before Agno sets `COMPLETED`; those runs are stored as success, not as still running.
 
 ## What each agent does
 

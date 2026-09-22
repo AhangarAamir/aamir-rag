@@ -10,6 +10,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from obs_adapter import import_session_runs
 from obs_pricing import catalog_status, model_rates, pricing_source
 from obs_store import add_comment, list_apps, list_comments, list_runs, utc_now, window_start
 
@@ -278,6 +279,10 @@ def observability_summary(
     days: int = Query(14, ge=1, le=365),
     app: Optional[str] = Query(None),
 ):
+    try:
+        import_session_runs()
+    except Exception:
+        pass
     since = window_start(days)
     runs = list_runs(since, app=app)
     comments = list_comments(since, app=app)
