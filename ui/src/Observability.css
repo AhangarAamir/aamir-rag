@@ -1,0 +1,246 @@
+.obs-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 500px at 80% -10%, rgba(56, 189, 248, 0.08), transparent 55%),
+    #071422;
+  color: #e7eef8;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.obs-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem 0.75rem;
+}
+
+.obs-kicker {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d7e6f7;
+}
+
+.obs-sub {
+  margin: 0.25rem 0 0;
+  color: #8aa3be;
+  font-size: 0.82rem;
+}
+
+.obs-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.obs-controls select,
+.obs-controls button,
+.obs-controls a {
+  background: #102033;
+  color: #dce8f6;
+  border: 1px solid #1d3550;
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.obs-controls button.primary {
+  background: #2f6dff;
+  border-color: #2f6dff;
+  color: white;
+}
+
+.obs-grid {
+  padding: 0 1.25rem 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.kpi-row,
+.chart-row {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.kpi-row {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.kpi-row.second {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.chart-row {
+  grid-template-columns: 1fr 1fr;
+}
+
+.obs-card,
+.obs-chip {
+  background: #0c1b2e;
+  border: 1px solid rgba(70, 110, 150, 0.18);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.obs-card {
+  padding: 0.9rem 1rem 0.75rem;
+}
+
+.obs-card h2,
+.kpi-label {
+  margin: 0;
+  color: #8aa3be;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.kpi-value {
+  margin: 0.35rem 0 0;
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.kpi-meta {
+  margin: 0.15rem 0 0;
+  color: #7f96b0;
+  font-size: 0.78rem;
+}
+
+.chip-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.55rem;
+}
+
+.obs-chip {
+  padding: 0.55rem 0.75rem;
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.obs-chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.obs-chip .dot.green { background: #3ee0a8; }
+.obs-chip .dot.blue { background: #4ea1ff; }
+.obs-chip .dot.gold { background: #f0c14b; }
+.obs-chip .dot.orange { background: #f59e0b; }
+.obs-chip .dot.white { background: #dbe7f5; }
+
+.chip-copy {
+  min-width: 0;
+}
+
+.chip-copy small {
+  display: block;
+  color: #8aa3be;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.chip-copy strong {
+  display: block;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.2rem;
+}
+
+.plot-host {
+  width: 100%;
+}
+
+.model-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.model-table th {
+  text-align: left;
+  color: #7f96b0;
+  font-weight: 600;
+  padding: 0.4rem 0.35rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.model-table td {
+  padding: 0.4rem 0.35rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.comments {
+  min-height: 160px;
+}
+
+.comment-empty {
+  color: #7f96b0;
+  text-align: center;
+  padding: 2.2rem 1rem;
+}
+
+.comment-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.comment-form input,
+.comment-form button {
+  background: #102033;
+  color: #dce8f6;
+  border: 1px solid #1d3550;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+}
+
+.obs-error {
+  margin: 0 1.25rem 0.5rem;
+  color: #f07178;
+}
+
+@media (max-width: 1100px) {
+  .kpi-row,
+  .kpi-row.second,
+  .chart-row,
+  .chip-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .obs-top {
+    flex-direction: column;
+  }
+  .kpi-row,
+  .kpi-row.second,
+  .chart-row,
+  .chip-row {
+    grid-template-columns: 1fr;
+  }
+}

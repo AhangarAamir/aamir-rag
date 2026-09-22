@@ -285,6 +285,11 @@ export default function App() {
           <div>
             <p className="eyebrow">Legal RAG</p>
             <h1>Query Agent</h1>
+            <p className="eyebrow" style={{ marginTop: "0.55rem" }}>
+              <a href="/observability" style={{ color: "inherit" }}>
+                Observability
+              </a>
+            </p>
           </div>
           <button type="button" className="ghost" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar">
             ✕

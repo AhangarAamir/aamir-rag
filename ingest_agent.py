@@ -13,12 +13,13 @@ from agno.tools.knowledge import KnowledgeManagementTools
 
 from config import OPENAI_MODEL, SESSIONS_DB_FILE
 from knowledge_store import get_knowledge
+from obs_adapter import attach_observability
 from prompts import INGEST_INSTRUCTIONS
 
 
 def build_ingest_agent() -> Agent:
     knowledge = get_knowledge()
-    return Agent(
+    return attach_observability(Agent(
         id="ingest-agent",
         name="Ingest Agent",
         model=OpenAIResponses(id=OPENAI_MODEL),
@@ -41,4 +42,4 @@ def build_ingest_agent() -> Agent:
         search_knowledge=False,
         markdown=True,
         instructions=INGEST_INSTRUCTIONS,
-    )
+    ))

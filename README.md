@@ -68,7 +68,7 @@ uv run python main.py os
 # or: uv run python agent_os.py
 ```
 
-The query UI is a Vite React app. Build it once, then AgentOS serves the files at `/`:
+The query UI is a Vite React app. Build it once, then AgentOS serves the files at `/` and `/observability`:
 
 ```bash
 cd ui
@@ -86,7 +86,7 @@ For live React work while AgentOS is running:
 cd ui && npm run dev
 ```
 
-Vite proxies `/agents` and `/sessions` to `http://127.0.0.1:8000`.
+Vite proxies `/agents`, `/sessions`, and `/observability/*` APIs to `http://127.0.0.1:8000`.
 
 The hosted control plane at [os.agno.com](https://os.agno.com) can still connect to the same AgentOS instance. Pick **Ingest Agent** (`ingest-agent`) or **Query Agent** (`query-agent`).
 
@@ -103,7 +103,7 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | Variable | Meaning |
 |---|---|
 | `OPENAI_API_KEY` | required |
-| `OPENAI_MODEL` | default `gpt-4o` |
+| `OPENAI_MODEL` | default `gpt-5.6-luna` |
 | `EMBEDDING_MODEL` | default `text-embedding-3-large` |
 | `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
 | `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
@@ -113,8 +113,25 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | `HOST` | bind address for AgentOS (default `127.0.0.1`; alias `AGENT_OS_HOST`) |
 | `PORT` | bind port for AgentOS (default `8000`; alias `AGENT_OS_PORT`) |
 | `CORS_ALLOWED_ORIGINS` | comma-separated browser origins (default `https://uracs.enp.ril.com`, `https://uracs.ucg.ril.com`) |
+| `OBS_APP` | app name stored on traces (default `legal-rag`) |
+| `OBS_TRACE_INNER` | `true` to also record chunker / topic-shift runs (default `false`) |
+| `OBS_INPUT_USD_PER_M` | optional USD / 1M input override for `OPENAI_MODEL` |
+| `OBS_CACHED_USD_PER_M` | optional USD / 1M cached-input override |
+| `OBS_OUTPUT_USD_PER_M` | optional USD / 1M output override |
 
 `agentic` uses the custom legal chunker. Default is async: local recursive split, one identity call, then parallel metadata labeling. Set `CHUNKER_ASYNC=false` for the old sequential window walk. Switch to `document` if ingest is still too expensive.
+
+## Observability dashboard
+
+Every ingest and query run is written to `data/observability.db` by a custom Agno post-hook adapter (run row + tool spans + estimated cost). Open the HRF-style dashboard at:
+
+[http://127.0.0.1:8000/observability](http://127.0.0.1:8000/observability)
+
+The query UI also has an **Observability** link in the sidebar. The page shows runs, success, avg/p95 latency, tokens, cost, query mix, routes, tokens vs latency, and day-wise pricing. User comments can be added from that page.
+
+Cost is estimated from token counts × USD / 1M rates. OpenAI does not expose a pricing API (`GET /v1/models` has no prices). At startup the app fetches the [LiteLLM model-price catalog](https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json), caches it under `data/model_prices.json`, and looks up `OPENAI_MODEL`. If that fetch fails it uses the cache, then a small built-in table (including official `gpt-5.6-luna` rates: **$0.20 / $0.02 / $1.20** per 1M). Changing `OPENAI_MODEL` in `.env` picks up the new model's rates on the next start. If a run includes provider `metrics.cost`, that value wins over the table.
+
+Data is local SQLite only. Inner agents (`legal-chunker`, `query-topic-shift`) are skipped unless `OBS_TRACE_INNER=true`.
 
 ## What each agent does
 

@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from config import CORS_ALLOWED_ORIGINS, DATA_DIR, HOST, PORT, require_api_key
 from ingest_agent import build_ingest_agent
 from knowledge_store import get_knowledge
+from obs_api import router as observability_router
 from query_agent import build_query_agent
 
 require_api_key()
@@ -28,10 +29,10 @@ UI_INDEX = UI_DIST / "index.html"
 UI_ASSETS = UI_DIST / "assets"
 
 base_app = FastAPI(title="Legal RAG Query UI")
+base_app.include_router(observability_router)
 
 
-@base_app.get("/", include_in_schema=False)
-async def query_ui():
+def _spa_index():
     if UI_INDEX.is_file():
         return FileResponse(UI_INDEX)
     return HTMLResponse(
@@ -41,6 +42,17 @@ async def query_ui():
         "then restart AgentOS.</p></body></html>",
         status_code=503,
     )
+
+
+@base_app.get("/", include_in_schema=False)
+async def query_ui():
+    return _spa_index()
+
+
+@base_app.get("/observability", include_in_schema=False)
+@base_app.get("/observability/", include_in_schema=False)
+async def observability_ui():
+    return _spa_index()
 
 
 if UI_ASSETS.is_dir():
