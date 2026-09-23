@@ -1068,6 +1068,24 @@ QUERY_INSTRUCTIONS = dedent(
 
     Same pattern for PSC and RSC: link/PSC/.../file.pdf or
     link/RSC/file.pdf when the file sits in the main folder.
+
+    STRICT PATH RULE: never include a local workspace dump in a citation
+    label or URL. The forbidden segment is exactly:
+
+    aamirWS/data/ril_data/<FAMILY>/
+
+    where <FAMILY> is JOA, JAO, PEL, PML, PSC, or RSC.
+    Delete that whole segment wherever it appears in folder_path.
+    Do not keep aamirWS. Do not keep data/ril_data after the family folder.
+
+    Wrong: RSC/aamirWS/data/ril_data/RSC/file.pdf
+    Right:  RSC/file.pdf
+    Wrong: .../Document%20Center/RSC/aamirWS/data/ril_data/RSC/file.pdf
+    Right:  .../Document%20Center/RSC/file.pdf
+
+    If real subfolders remain after that deletion, keep them
+    (RSC/Subfolder/file.pdf). Do not invent folders.
+
     Greetings, thanks and capability replies have no References section.
 
     Quote short operative wording when useful, especially:
@@ -1112,7 +1130,8 @@ QUERY_INSTRUCTIONS = dedent(
     - missing evidence is explicitly disclosed;
     - a References section is present with a clickable link for each
       cited file using the full Document Center folder tree
-      (JOA/NEW JOA/file.pdf, PEL/file.pdf, PML/OLD PML/file.pdf).
+      (JOA/NEW JOA/file.pdf, PEL/file.pdf, PML/OLD PML/file.pdf);
+    - no citation path or URL contains aamirWS or data/ril_data.
 
     If the completion check fails, search again or state that the knowledge
     base did not provide sufficient evidence.

@@ -20,7 +20,12 @@ from agno.utils.log import log_debug, log_error
 
 from config import NUM_HISTORY_RUNS, OPENAI_MODEL, SEARCH_MAX_RESULTS, SESSIONS_DB_FILE
 from knowledge_store import get_knowledge
-from legal_chunking import build_chroma_filters, document_matches_instrument, rank_documents
+from legal_chunking import (
+    build_chroma_filters,
+    document_matches_instrument,
+    rank_documents,
+    strip_workspace_path,
+)
 from obs_adapter import attach_observability
 from prompts import QUERY_FEW_SHOT, QUERY_INSTRUCTIONS, QUERY_TOOL_INSTRUCTIONS
 from query_topic_shift import isolate_unrelated_query, restore_query_history
@@ -203,7 +208,8 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
                         f"No hit matched instrument {instrument_name!r}; "
                         "returning ranked unfiltered hits"
                     )
-            return json.dumps([doc.to_dict() for doc in ranked])
+            payload = [doc.to_dict() for doc in ranked]
+            return strip_workspace_path(json.dumps(payload))
         except Exception as e:
             log_error(f"Error searching knowledge base: {str(e)}")
             return f"Error searching knowledge base: {e}"

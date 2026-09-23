@@ -177,6 +177,20 @@ def guess_doc_family(*parts: str) -> str:
     return hit.code if hit else ""
 
 
+# Local workspace dump copied under a family folder. It is not a Document Center path.
+_WORKSPACE_PATH = re.compile(
+    r"aamirWS/data/ril_data/(?:JOA|JAO|PEL|PML|PSC|RSC)/?",
+    re.IGNORECASE,
+)
+
+
+def strip_workspace_path(text: str) -> str:
+    """Drop aamirWS/data/ril_data/<family> so citations stay family/file."""
+    if not text or "aamirws" not in text.lower():
+        return text
+    return _WORKSPACE_PATH.sub("", text)
+
+
 def _relative_folder(path: Path) -> str:
     parent = path.resolve().parent
     for root in (INCOMING_DIR.resolve(), ROOT_DIR.resolve()):
@@ -212,7 +226,7 @@ def origin_from_source(
     display = Path(name).stem if name else (path.stem if path is not None else filename)
     if display.lower().endswith(".pdf"):
         display = display[:-4]
-    folder_path = _relative_folder(path) if path is not None else ""
+    folder_path = strip_workspace_path(_relative_folder(path)) if path is not None else ""
     hit = identify_collection(folder_path, filename, display)
     family = hit.code if hit else ""
     return SourceOrigin(
@@ -262,7 +276,7 @@ def locator_prefix(meta: Dict[str, Any], name: str = "") -> str:
             lines.append(f"[Family: {family} | {description}]")
         else:
             lines.append(f"[Family: {family}]")
-    folder = meta.get("folder_path")
+    folder = strip_workspace_path(str(meta.get("folder_path") or ""))
     if folder:
         lines.append(f"[Folder: {folder}]")
     location_bits = []

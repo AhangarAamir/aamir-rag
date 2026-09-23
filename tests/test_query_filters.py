@@ -5,8 +5,28 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from legal_chunking import build_chroma_filters
+from legal_chunking import build_chroma_filters, strip_workspace_path
 from query_agent import SharedCorpusKnowledgeTools, scratch_for_run
+
+
+class WorkspacePathTests(unittest.TestCase):
+    def test_strips_rsc_workspace_dump(self):
+        raw = "RSC/aamirWS/data/ril_data/RSC/RSC GS_OSHP_2022_2_ONGC_RIL_BP.pdf"
+        self.assertEqual(strip_workspace_path(raw), "RSC/RSC GS_OSHP_2022_2_ONGC_RIL_BP.pdf")
+
+    def test_strips_workspace_from_document_center_url(self):
+        raw = (
+            "https://enp1.ril.com/sites/Regulatory/Document%20Center/"
+            "RSC/aamirWS/data/ril_data/RSC/file.pdf"
+        )
+        self.assertEqual(
+            strip_workspace_path(raw),
+            "https://enp1.ril.com/sites/Regulatory/Document%20Center/RSC/file.pdf",
+        )
+
+    def test_leaves_real_psc_folders(self):
+        raw = "PSC/ril_data/Domestic/NELP 1/KGD6-PSC_2000.04.12.pdf"
+        self.assertEqual(strip_workspace_path(raw), raw)
 
 
 class BuildChromaFiltersTests(unittest.TestCase):

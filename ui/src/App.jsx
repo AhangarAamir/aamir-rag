@@ -35,8 +35,13 @@ function Activity({ tools }) {
   );
 }
 
+function stripWorkspacePath(text) {
+  return text.replace(/aamirWS\/data\/ril_data\/(?:JOA|JAO|PEL|PML|PSC|RSC)\/?/gi, "");
+}
+
 function normalizeMarkdown(text) {
   if (!text) return text;
+  text = stripWorkspacePath(text);
   return text.replace(/((?:^|\n)(?:\|[^\n]+)+)/g, (block) => {
     if (!/\|[\s:-]+\|/.test(block)) return block;
     if (block.includes("\n|")) return block;
