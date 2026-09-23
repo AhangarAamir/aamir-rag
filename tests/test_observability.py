@@ -304,6 +304,40 @@ class StoreSummaryTests(unittest.TestCase):
         self.assertGreater(summary["p95_ms"], summary["avg_ms"])
         self.assertIn("cost_input", summary["days_series"][0])
 
+    def test_unrealistic_latency_is_omitted(self):
+        start = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+        upsert_run(
+            {
+                "run_id": "outlier",
+                "app": "legal-rag",
+                "agent_id": "query-agent",
+                "agent_name": "Query Agent",
+                "route": "query-agent",
+                "query_class": "JOA",
+                "status": "ok",
+                "model": "gpt-5.6-luna",
+                "started_at": iso(start),
+                "ended_at": iso(start + timedelta(seconds=11000)),
+                "duration_ms": 11_000_000,
+                "input_tokens": 10,
+                "output_tokens": 1,
+                "cached_tokens": 0,
+                "total_tokens": 11,
+                "cost_usd": 0.0,
+                "session_id": "s-out",
+                "user_id": "u1",
+                "input_text": "JOA outlier",
+                "output_text": "",
+            }
+        )
+        since = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        runs = list_runs(since, app="legal-rag")
+        summary = _build_summary(runs, [], days=14)
+        self.assertEqual(summary["runs"], 3)
+        self.assertEqual(len(summary["scatter"]), 2)
+        self.assertTrue(all(row["latency_s"] <= 200 for row in summary["scatter"]))
+        self.assertLess(summary["p95_ms"], 200_000)
+
 
 class ApiTests(StoreSummaryTests):
     def setUp(self):

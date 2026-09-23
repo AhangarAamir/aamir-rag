@@ -17,6 +17,9 @@ from obs_store import add_comment, list_apps, list_comments, list_runs, utc_now,
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 
+# Tokens-vs-latency is fixed at 0–200s. Longer values are bad durations, not real runs.
+MAX_PLOT_LATENCY_MS = 200_000.0
+
 
 class CommentIn(BaseModel):
     comment: str = Field(min_length=1)
@@ -38,6 +41,16 @@ def _percentile(values: list[float], pct: float) -> float:
     return ordered[low] * (1.0 - weight) + ordered[high] * weight
 
 
+def _plot_duration_ms(row: dict[str, Any]) -> float | None:
+    raw = row.get("duration_ms")
+    if raw is None:
+        return None
+    value = float(raw)
+    if value < 0 or value > MAX_PLOT_LATENCY_MS:
+        return None
+    return value
+
+
 def _day_key(started_at: str) -> str:
     dt = datetime.fromisoformat(started_at.replace("Z", "+00:00")).astimezone(timezone.utc)
     return dt.date().isoformat()
@@ -48,7 +61,7 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
     ok = [row for row in runs if row["status"] == "ok"]
     fail = [row for row in runs if row["status"] == "fail"]
     running = [row for row in runs if row["status"] == "run"]
-    durations = [float(row["duration_ms"]) for row in runs if row.get("duration_ms") is not None]
+    durations = [ms for row in runs if (ms := _plot_duration_ms(row)) is not None]
     tokens_in = sum(int(row["input_tokens"] or 0) for row in runs)
     tokens_out = sum(int(row["output_tokens"] or 0) for row in runs)
     tokens_cached = sum(int(row["cached_tokens"] or 0) for row in runs)
@@ -96,8 +109,9 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
         bucket = by_day[day]
         status = row["status"] or "ok"
         bucket[status] = int(bucket.get(status, 0)) + 1
-        if row.get("duration_ms") is not None:
-            bucket["durations"].append(float(row["duration_ms"]))
+        duration_ms = _plot_duration_ms(row)
+        if duration_ms is not None:
+            bucket["durations"].append(duration_ms)
         bucket["cost"] += float(row["cost_usd"] or 0)
         inp_tok = int(row["input_tokens"] or 0)
         out_tok = int(row["output_tokens"] or 0)
@@ -121,16 +135,16 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
             by_class[cls]["count"] += 1
             if status == "ok":
                 by_class[cls]["ok"] += 1
-            if row.get("duration_ms") is not None:
-                by_class[cls]["duration_sum"] += float(row["duration_ms"])
+            if duration_ms is not None:
+                by_class[cls]["duration_sum"] += duration_ms
                 by_class[cls]["duration_n"] += 1
 
         route = row.get("route") or row.get("agent_id") or "unknown"
         by_route[route]["count"] += 1
         if status == "ok":
             by_route[route]["ok"] += 1
-        if row.get("duration_ms") is not None:
-            by_route[route]["duration_sum"] += float(row["duration_ms"])
+        if duration_ms is not None:
+            by_route[route]["duration_sum"] += duration_ms
             by_route[route]["duration_n"] += 1
 
         model = row.get("model") or "unknown"
@@ -140,16 +154,17 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
         by_model[model]["output_tokens"] += int(row["output_tokens"] or 0)
         by_model[model]["cost"] += float(row["cost_usd"] or 0)
 
-        scatter.append(
-            {
-                "tokens": int(row["total_tokens"] or 0)
-                or (int(row["input_tokens"] or 0) + int(row["output_tokens"] or 0)),
-                "latency_s": float(row["duration_ms"] or 0) / 1000.0,
-                "latency_ms": float(row["duration_ms"] or 0),
-                "run_id": row["run_id"],
-                "route": route,
-            }
-        )
+        if duration_ms is not None:
+            scatter.append(
+                {
+                    "tokens": int(row["total_tokens"] or 0)
+                    or (int(row["input_tokens"] or 0) + int(row["output_tokens"] or 0)),
+                    "latency_s": duration_ms / 1000.0,
+                    "latency_ms": duration_ms,
+                    "run_id": row["run_id"],
+                    "route": route,
+                }
+            )
 
     peak_day = ""
     peak_count = 0

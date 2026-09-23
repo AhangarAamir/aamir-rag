@@ -30,16 +30,6 @@ const LATENCY_AXIS = {
   separatethousands: true,
 };
 
-function latencyTickStep(maxSeconds) {
-  const max = Math.max(0, maxSeconds);
-  if (max <= 100) return 10;
-  const target = Math.max(max / 8, 10);
-  const pow = 10 ** Math.floor(Math.log10(target));
-  const scaled = target / pow;
-  const nice = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
-  return nice * pow;
-}
-
 function shortDate(day) {
   const d = new Date(`${day}T00:00:00Z`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -178,12 +168,13 @@ export default function Observability() {
   );
 
   const scatter = useMemo(() => {
-    const points = data?.scatter || [];
+    const points = (data?.scatter || []).filter((row) => {
+      const seconds = Number(row.latency_s ?? (row.latency_ms || 0) / 1000) || 0;
+      return seconds >= 0 && seconds <= 200;
+    });
     const seconds = points.map(
       (row) => Number(row.latency_s ?? (row.latency_ms || 0) / 1000) || 0,
     );
-    const maxS = seconds.reduce((max, value) => Math.max(max, value), 0);
-    const dtick = latencyTickStep(maxS);
     return {
       chart: [
         {
@@ -198,13 +189,16 @@ export default function Observability() {
         },
       ],
       layout: {
-        margin: { t: 36, r: 24, b: 56, l: maxS >= 1000 ? 84 : 64 },
+        margin: { t: 36, r: 24, b: 56, l: 64 },
         xaxis: { title: "Tokens", rangemode: "nonnegative" },
         yaxis: {
           ...LATENCY_AXIS,
+          range: [0, 200],
+          autorange: false,
+          fixedrange: true,
           tickmode: "linear",
           tick0: 0,
-          dtick,
+          dtick: 50,
         },
         showlegend: false,
       },
