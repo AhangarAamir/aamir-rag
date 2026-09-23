@@ -303,6 +303,20 @@ class StoreSummaryTests(unittest.TestCase):
         self.assertEqual(summary["slowest_route"], "ingest-agent")
         self.assertGreater(summary["p95_ms"], summary["avg_ms"])
         self.assertIn("cost_input", summary["days_series"][0])
+        dates = [row["date"] for row in summary["days_series"]]
+        parsed = [datetime.fromisoformat(day).date() for day in dates]
+        self.assertEqual(
+            parsed,
+            [parsed[0] + timedelta(days=offset) for offset in range(len(parsed))],
+        )
+        self.assertGreater(len(dates), 2)
+        empty = next(
+            row
+            for row in summary["days_series"]
+            if row["ok"] + row["fail"] + row["run"] == 0
+        )
+        self.assertEqual(empty["cost"], 0.0)
+        self.assertEqual(empty["input_tokens"], 0)
 
     def test_unrealistic_latency_is_omitted(self):
         start = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any, Optional
 
@@ -54,6 +54,36 @@ def _plot_duration_ms(row: dict[str, Any]) -> float | None:
 def _day_key(started_at: str) -> str:
     dt = datetime.fromisoformat(started_at.replace("Z", "+00:00")).astimezone(timezone.utc)
     return dt.date().isoformat()
+
+
+def _window_dates(days: int, now: datetime) -> list[str]:
+    """Every UTC calendar day touched by the selected window, including empty days."""
+    start = (now - timedelta(days=max(1, days))).astimezone(timezone.utc).date()
+    end = now.astimezone(timezone.utc).date()
+    dates: list[str] = []
+    cursor = start
+    while cursor <= end:
+        dates.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return dates
+
+
+def _empty_day(day: str) -> dict[str, Any]:
+    return {
+        "date": day,
+        "ok": 0,
+        "fail": 0,
+        "run": 0,
+        "avg_ms": 0.0,
+        "p95_ms": 0.0,
+        "cost": 0.0,
+        "cost_input": 0.0,
+        "cost_cached": 0.0,
+        "cost_output": 0.0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cached_tokens": 0,
+    }
 
 
 def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], days: int) -> dict[str, Any]:
@@ -200,8 +230,11 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
             top_model = name
 
     days_series = []
-    for day in sorted(by_day):
-        bucket = by_day[day]
+    for day in _window_dates(days, now):
+        bucket = by_day.get(day)
+        if not bucket:
+            days_series.append(_empty_day(day))
+            continue
         durations = bucket["durations"]
         days_series.append(
             {
