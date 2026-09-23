@@ -42,7 +42,6 @@ function localTime(iso) {
 
 export default function Observability() {
   const [days, setDays] = useState(14);
-  const [app, setApp] = useState("");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
@@ -51,14 +50,13 @@ export default function Observability() {
     try {
       setError("");
       const params = new URLSearchParams({ days: String(days) });
-      if (app) params.set("app", app);
       const res = await fetch(`/observability/summary?${params}`);
       if (!res.ok) throw new Error(await res.text());
       setData(await res.json());
     } catch (err) {
       setError(err.message || "Failed to load observability data");
     }
-  }, [days, app]);
+  }, [days]);
 
   useEffect(() => {
     document.title = "BIF Search Observability";
@@ -270,14 +268,6 @@ export default function Observability() {
         </div>
         <div className="obs-controls">
           <a href="/">Query UI</a>
-          <select value={app} onChange={(e) => setApp(e.target.value)} aria-label="App">
-            <option value="">App</option>
-            {(data?.apps || ["legal-rag"]).map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Range">
             <option value={1}>1d</option>
             <option value={7}>7d</option>

@@ -15,7 +15,6 @@ export default defineConfig({
       "/sessions": "http://127.0.0.1:8000",
       "/observability/summary": "http://127.0.0.1:8000",
       "/observability/runs": "http://127.0.0.1:8000",
-      "/observability/apps": "http://127.0.0.1:8000",
       "/observability/comments": "http://127.0.0.1:8000",
       "/observability/pricing": "http://127.0.0.1:8000",
     },

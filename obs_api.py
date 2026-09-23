@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from obs_adapter import classify_query_class, import_session_runs
 from document_catalog import QUERY_MIX_CODES
 from obs_pricing import catalog_status, model_rates, pricing_source
-from obs_store import add_comment, list_apps, list_comments, list_runs, utc_now, window_start
+from obs_store import add_comment, list_comments, list_runs, utc_now, window_start
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 
@@ -295,39 +295,29 @@ def _build_summary(runs: list[dict[str, Any]], comments: list[dict[str, Any]], d
         "pricing": catalog_status(),
         "scatter": scatter,
         "comments": comments,
-        "apps": list_apps(),
     }
 
 
 @router.get("/summary")
-def observability_summary(
-    days: int = Query(14, ge=1, le=365),
-    app: Optional[str] = Query(None),
-):
+def observability_summary(days: int = Query(14, ge=1, le=365)):
     try:
         import_session_runs()
     except Exception:
         pass
     since = window_start(days)
-    runs = list_runs(since, app=app)
-    comments = list_comments(since, app=app)
+    runs = list_runs(since)
+    comments = list_comments(since)
     return _build_summary(runs, comments, days)
 
 
 @router.get("/runs")
 def observability_runs(
     days: int = Query(14, ge=1, le=365),
-    app: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=2000),
 ):
     since = window_start(days)
-    runs = list_runs(since, app=app)
+    runs = list_runs(since)
     return {"data": runs[-limit:]}
-
-
-@router.get("/apps")
-def observability_apps():
-    return {"data": list_apps()}
 
 
 @router.get("/pricing")
