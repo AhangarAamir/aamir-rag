@@ -22,6 +22,12 @@ function fmtMs(ms) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function latencyScale(maxSeconds) {
+  if (maxSeconds >= 3600) return { divide: 3600, title: "Latency (hours)", unit: "h", digits: 2 };
+  if (maxSeconds >= 180) return { divide: 60, title: "Latency (minutes)", unit: "min", digits: 1 };
+  return { divide: 1, title: "Latency (seconds)", unit: "s", digits: 1 };
+}
+
 function shortDate(day) {
   const d = new Date(`${day}T00:00:00Z`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -113,27 +119,44 @@ export default function Observability() {
     [mix],
   );
 
-  const latencyChart = useMemo(
-    () => [
-      {
-        type: "scatter",
-        mode: "lines+markers",
-        name: "avg",
-        x,
-        y: series.map((row) => row.avg_ms),
-        line: { color: BLUE, width: 2 },
+  const latencyChart = useMemo(() => {
+    const avgS = series.map((row) => (row.avg_ms || 0) / 1000);
+    const p95S = series.map((row) => (row.p95_ms || 0) / 1000);
+    const maxS = Math.max(0, ...avgS, ...p95S);
+    const scale = latencyScale(maxS);
+    const hover = `%{y:.${scale.digits}f} ${scale.unit}<extra></extra>`;
+    return {
+      data: [
+        {
+          type: "scatter",
+          mode: "lines+markers",
+          name: "avg",
+          x,
+          y: avgS.map((value) => value / scale.divide),
+          line: { color: BLUE, width: 2 },
+          hovertemplate: `avg: ${hover}`,
+        },
+        {
+          type: "scatter",
+          mode: "lines+markers",
+          name: "p95",
+          x,
+          y: p95S.map((value) => value / scale.divide),
+          line: { color: GOLD, width: 2 },
+          hovertemplate: `p95: ${hover}`,
+        },
+      ],
+      layout: {
+        yaxis: {
+          title: scale.title,
+          rangemode: "nonnegative",
+          tickformat: scale.digits === 2 ? ".2f" : ".0f",
+          exponentformat: "none",
+          separatethousands: false,
+        },
       },
-      {
-        type: "scatter",
-        mode: "lines+markers",
-        name: "p95",
-        x,
-        y: series.map((row) => row.p95_ms),
-        line: { color: GOLD, width: 2 },
-      },
-    ],
-    [series, x],
-  );
+    };
+  }, [series, x]);
 
   const routes = [...(data?.routes || [])].slice().reverse();
   const routeChart = useMemo(
@@ -154,21 +177,40 @@ export default function Observability() {
     [routes],
   );
 
-  const scatterChart = useMemo(
-    () => [
-      {
-        type: "scatter",
-        mode: "markers",
-        name: "run",
-        x: (data?.scatter || []).map((row) => row.tokens),
-        y: (data?.scatter || []).map((row) => row.latency_s ?? (row.latency_ms || 0) / 1000),
-        marker: { color: BLUE, size: 9, opacity: 0.85 },
-        text: (data?.scatter || []).map((row) => row.route),
-        hovertemplate: "Tokens: %{x:,}<br>Latency: %{y:.1f} s<br>%{text}<extra></extra>",
+  const scatter = useMemo(() => {
+    const points = data?.scatter || [];
+    const seconds = points.map(
+      (row) => Number(row.latency_s ?? (row.latency_ms || 0) / 1000) || 0,
+    );
+    const maxS = seconds.reduce((max, value) => Math.max(max, value), 0);
+    const { divide, title, unit, digits } = latencyScale(maxS);
+    return {
+      chart: [
+        {
+          type: "scatter",
+          mode: "markers",
+          name: "run",
+          x: points.map((row) => row.tokens),
+          y: seconds.map((value) => value / divide),
+          marker: { color: BLUE, size: 9, opacity: 0.85 },
+          text: points.map((row) => row.route),
+          hovertemplate: `Tokens: %{x:,}<br>Latency: %{y:.${digits}f} ${unit}<br>%{text}<extra></extra>`,
+        },
+      ],
+      layout: {
+        margin: { t: 36, r: 24, b: 56, l: 72 },
+        xaxis: { title: "Tokens", rangemode: "nonnegative" },
+        yaxis: {
+          title,
+          rangemode: "nonnegative",
+          tickformat: digits === 2 ? ".2f" : ".0f",
+          exponentformat: "none",
+          separatethousands: false,
+        },
+        showlegend: false,
       },
-    ],
-    [data],
-  );
+    };
+  }, [data]);
 
   const pricingChart = useMemo(
     () => [
@@ -393,11 +435,7 @@ export default function Observability() {
               <h2>Latency</h2>
               <span className="kpi-meta">p95 {fmtMs(data?.p95_ms)}</span>
             </div>
-            <PlotChart
-              modeBar
-              data={latencyChart}
-              layout={{ yaxis: { title: "Latency (ms)" } }}
-            />
+            <PlotChart data={latencyChart.data} layout={latencyChart.layout} />
           </article>
           <article className="obs-card">
             <div className="card-head">
@@ -419,21 +457,8 @@ export default function Observability() {
           <article className="obs-card">
             <div className="card-head">
               <h2>Tokens vs latency</h2>
-              <span className="kpi-meta">X = tokens · Y = latency (s)</span>
             </div>
-            <PlotChart
-              data={scatterChart}
-              layout={{
-                margin: { t: 40, r: 36, b: 64, l: 80 },
-                xaxis: { title: "Tokens", rangemode: "tozero" },
-                yaxis: {
-                  title: "Latency (seconds)",
-                  rangemode: "tozero",
-                  ticksuffix: " s",
-                },
-                showlegend: false,
-              }}
-            />
+            <PlotChart data={scatter.chart} layout={scatter.layout} />
           </article>
           <article className="obs-card">
             <div className="card-head">
