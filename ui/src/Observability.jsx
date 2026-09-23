@@ -22,11 +22,13 @@ function fmtMs(ms) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function latencyScale(maxSeconds) {
-  if (maxSeconds >= 3600) return { divide: 3600, title: "Latency (hours)", unit: "h", digits: 2 };
-  if (maxSeconds >= 180) return { divide: 60, title: "Latency (minutes)", unit: "min", digits: 1 };
-  return { divide: 1, title: "Latency (seconds)", unit: "s", digits: 1 };
-}
+const LATENCY_AXIS = {
+  title: "Latency (seconds)",
+  rangemode: "nonnegative",
+  tickformat: ",.0f",
+  exponentformat: "none",
+  separatethousands: true,
+};
 
 function shortDate(day) {
   const d = new Date(`${day}T00:00:00Z`);
@@ -119,44 +121,32 @@ export default function Observability() {
     [mix],
   );
 
-  const latencyChart = useMemo(() => {
-    const avgS = series.map((row) => (row.avg_ms || 0) / 1000);
-    const p95S = series.map((row) => (row.p95_ms || 0) / 1000);
-    const maxS = Math.max(0, ...avgS, ...p95S);
-    const scale = latencyScale(maxS);
-    const hover = `%{y:.${scale.digits}f} ${scale.unit}<extra></extra>`;
-    return {
+  const latencyChart = useMemo(
+    () => ({
       data: [
         {
           type: "scatter",
           mode: "lines+markers",
           name: "avg",
           x,
-          y: avgS.map((value) => value / scale.divide),
+          y: series.map((row) => (row.avg_ms || 0) / 1000),
           line: { color: BLUE, width: 2 },
-          hovertemplate: `avg: ${hover}`,
+          hovertemplate: "avg: %{y:,.1f} s<extra></extra>",
         },
         {
           type: "scatter",
           mode: "lines+markers",
           name: "p95",
           x,
-          y: p95S.map((value) => value / scale.divide),
+          y: series.map((row) => (row.p95_ms || 0) / 1000),
           line: { color: GOLD, width: 2 },
-          hovertemplate: `p95: ${hover}`,
+          hovertemplate: "p95: %{y:,.1f} s<extra></extra>",
         },
       ],
-      layout: {
-        yaxis: {
-          title: scale.title,
-          rangemode: "nonnegative",
-          tickformat: scale.digits === 2 ? ".2f" : ".0f",
-          exponentformat: "none",
-          separatethousands: false,
-        },
-      },
-    };
-  }, [series, x]);
+      layout: { yaxis: { ...LATENCY_AXIS } },
+    }),
+    [series, x],
+  );
 
   const routes = [...(data?.routes || [])].slice().reverse();
   const routeChart = useMemo(
@@ -182,8 +172,6 @@ export default function Observability() {
     const seconds = points.map(
       (row) => Number(row.latency_s ?? (row.latency_ms || 0) / 1000) || 0,
     );
-    const maxS = seconds.reduce((max, value) => Math.max(max, value), 0);
-    const { divide, title, unit, digits } = latencyScale(maxS);
     return {
       chart: [
         {
@@ -191,21 +179,20 @@ export default function Observability() {
           mode: "markers",
           name: "run",
           x: points.map((row) => row.tokens),
-          y: seconds.map((value) => value / divide),
+          y: seconds,
           marker: { color: BLUE, size: 9, opacity: 0.85 },
           text: points.map((row) => row.route),
-          hovertemplate: `Tokens: %{x:,}<br>Latency: %{y:.${digits}f} ${unit}<br>%{text}<extra></extra>`,
+          hovertemplate: "Tokens: %{x:,}<br>Latency: %{y:,.1f} s<br>%{text}<extra></extra>",
         },
       ],
       layout: {
         margin: { t: 36, r: 24, b: 56, l: 72 },
         xaxis: { title: "Tokens", rangemode: "nonnegative" },
         yaxis: {
-          title,
-          rangemode: "nonnegative",
-          tickformat: digits === 2 ? ".2f" : ".0f",
-          exponentformat: "none",
-          separatethousands: false,
+          ...LATENCY_AXIS,
+          tickmode: "linear",
+          tick0: 0,
+          dtick: 10,
         },
         showlegend: false,
       },
