@@ -37,6 +37,21 @@ def _draft_fields(draft: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _direct_feedback(feedback: str) -> dict[str, Any]:
+    """Keep the user's words. Do not rewrite them with a model."""
+    text = feedback.strip()
+    return {
+        "title": text[:180] or "User feedback",
+        "lesson": text,
+        "severity": "medium",
+        "tags": ["user_feedback"],
+        "confidence": 1.0,
+        "files": [],
+        "context": "",
+        "area": "contract",
+    }
+
+
 def submit_feedback(
     *,
     feedback: str,
@@ -47,12 +62,7 @@ def submit_feedback(
     user_id: str | None = None,
 ) -> dict[str, Any]:
     source_key = f"feedback:{run_id}" if run_id else f"feedback:{uuid.uuid4().hex}"
-    draft = extract_lesson(
-        query=query,
-        answer=answer,
-        feedback=feedback,
-        incident_type="user_feedback",
-    )
+    draft = _direct_feedback(feedback)
     incident = insert_incident(
         type="user_feedback",
         area=draft["area"],

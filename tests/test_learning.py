@@ -93,6 +93,7 @@ class LearningReviewTests(unittest.TestCase):
         )
         lesson = created["lesson"]
         self.assertEqual(lesson["status"], "candidate")
+        self.assertEqual(lesson["lesson"], "That clause is from the wrong PSC.")
         self.assertEqual(self.knowledge.rows, [])
         self.assertEqual(preview_lessons("article 10.7"), [])
 
@@ -101,7 +102,7 @@ class LearningReviewTests(unittest.TestCase):
         self.assertEqual(len(self.knowledge.rows), 1)
         self.assertEqual(learning_store.count_eval_cases(), 1)
         recalled = preview_lessons("article 10.7")
-        self.assertEqual([item["title"] for item in recalled], ["Recheck the named instrument"])
+        self.assertEqual([item["title"] for item in recalled], ["That clause is from the wrong PSC."])
         self.assertEqual(recalled[0]["lesson_id"], lesson["lesson_id"])
         counts = summary(datetime.now(timezone.utc) - timedelta(days=14))
         self.assertEqual(counts["total_feedbacks"], 1)
@@ -143,7 +144,7 @@ class LearningReviewTests(unittest.TestCase):
             }
         )
         titles = [item["title"] for item in preview_lessons("assignment")]
-        self.assertEqual(titles, ["Recheck the named instrument"])
+        self.assertEqual(titles, ["Wrong document"])
 
     def test_analyze_logs_creates_candidates_only(self):
         started = datetime.now(timezone.utc) - timedelta(hours=1)
