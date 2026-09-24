@@ -397,6 +397,55 @@ h1 {
   color: var(--danger);
 }
 
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  align-items: center;
+}
+
+.feedback input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+}
+
+.feedback button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+.feedback button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.feedback-note,
+.feedback-error {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.feedback-note {
+  color: var(--accent);
+}
+
+.feedback-error {
+  color: var(--danger);
+}
+
 @media (max-width: 800px) {
   .app {
     grid-template-columns: 1fr;

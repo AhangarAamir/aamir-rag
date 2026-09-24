@@ -49,7 +49,57 @@ function normalizeMarkdown(text) {
   });
 }
 
-function MessageBubble({ message }) {
+function FeedbackBox({ message, query, sessionId, userId }) {
+  const [text, setText] = useState("");
+  const [state, setState] = useState("idle");
+  const [note, setNote] = useState("");
+
+  const sendFeedback = async (event) => {
+    event.preventDefault();
+    const feedback = text.trim();
+    if (!feedback || state === "sending") return;
+    setState("sending");
+    setNote("");
+    try {
+      const res = await fetch("/learning/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feedback,
+          query: query || "",
+          answer: message.content || "",
+          run_id: message.runId || null,
+          session_id: sessionId,
+          user_id: userId,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setState("sent");
+      setText("");
+      setNote("Sent for review");
+    } catch (err) {
+      setState("idle");
+      setNote(err.message || "Could not send feedback");
+    }
+  };
+
+  return (
+    <form className="feedback" onSubmit={sendFeedback}>
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Correction or complaint for this answer"
+        disabled={state === "sending"}
+      />
+      <button type="submit" disabled={state === "sending" || !text.trim()}>
+        {state === "sending" ? "Sending" : "Feedback"}
+      </button>
+      {note && <p className={state === "sent" ? "feedback-note" : "feedback-error"}>{note}</p>}
+    </form>
+  );
+}
+
+function MessageBubble({ message, query, sessionId, userId }) {
   return (
     <article className={`bubble ${message.role}`}>
       <div className="bubble-role">{message.role === "user" ? "You" : "Query Agent"}</div>
@@ -75,6 +125,9 @@ function MessageBubble({ message }) {
         </div>
       )}
       {message.error && <p className="bubble-error">{message.error}</p>}
+      {message.role === "assistant" && !message.streaming && (message.content || message.error) && (
+        <FeedbackBox message={message} query={query} sessionId={sessionId} userId={userId} />
+      )}
     </article>
   );
 }
@@ -181,6 +234,9 @@ export default function App() {
         userId,
         files: attached,
         onEvent: (event, data) => {
+          if (data?.run_id) {
+            patchAssistant((msg) => ({ ...msg, runId: msg.runId || data.run_id }));
+          }
           if (event === "ToolCallStarted") {
             const tool = data.tool || {};
             patchAssistant((msg) => ({
@@ -262,7 +318,11 @@ export default function App() {
             return;
           }
           if (event === "RunCompleted" || event === "RunCancelled") {
-            patchAssistant((msg) => ({ ...msg, streaming: false }));
+            patchAssistant((msg) => ({
+              ...msg,
+              streaming: false,
+              runId: data.run_id || msg.runId,
+            }));
           }
         },
       });
@@ -293,6 +353,10 @@ export default function App() {
             <p className="eyebrow" style={{ marginTop: "0.55rem" }}>
               <a href="/observability" style={{ color: "inherit" }}>
                 Observability
+              </a>
+              {" · "}
+              <a href="/learning" style={{ color: "inherit" }}>
+                Learning
               </a>
             </p>
           </div>
@@ -340,8 +404,14 @@ export default function App() {
               </p>
             </div>
           )}
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+          {messages.map((message, index) => (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              query={message.role === "assistant" ? messages[index - 1]?.content || "" : ""}
+              sessionId={sessionId}
+              userId={userId}
+            />
           ))}
         </div>
         {error && <p className="banner-error">{error}</p>}

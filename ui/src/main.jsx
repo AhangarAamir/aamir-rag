@@ -1,11 +1,15 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
+import Learning from "./Learning.jsx";
 import Observability from "./Observability.jsx";
 import "./App.css";
 
-const page = window.location.pathname.startsWith("/observability") ? (
+const path = window.location.pathname;
+const page = path.startsWith("/observability") ? (
   <Observability />
+) : path.startsWith("/learning") ? (
+  <Learning />
 ) : (
   <App />
 );

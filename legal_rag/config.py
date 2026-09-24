@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
@@ -18,7 +18,7 @@ COLLECTION_NAME = "legal_contracts"
 INCOMING_DIR.mkdir(parents=True, exist_ok=True)
 VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
 
-from document_catalog import ensure_incoming_layout
+from legal_rag.knowledge.catalog import ensure_incoming_layout
 
 ensure_incoming_layout(INCOMING_DIR)
 

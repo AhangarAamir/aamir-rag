@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from config import DATA_DIR
+from legal_rag.config import DATA_DIR
 
 OBS_DB_FILE = DATA_DIR / "observability.db"
 
@@ -265,3 +265,21 @@ def list_runs(
 
 def window_start(days: int) -> datetime:
     return utc_now() - timedelta(days=max(1, days))
+
+
+def list_spans(run_ids: list[str]) -> list[dict[str, Any]]:
+    """Tool spans for the given runs. Empty input returns no rows."""
+    if not run_ids:
+        return []
+    rows: list[dict[str, Any]] = []
+    with _LOCK:
+        conn = _connect()
+        for start in range(0, len(run_ids), 200):
+            chunk = run_ids[start : start + 200]
+            marks = ",".join("?" * len(chunk))
+            found = conn.execute(
+                f"SELECT * FROM obs_spans WHERE run_id IN ({marks})",
+                chunk,
+            ).fetchall()
+            rows.extend(dict(row) for row in found)
+    return rows

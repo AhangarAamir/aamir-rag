@@ -18,7 +18,7 @@ from urllib.error import URLError
 
 from agno.utils.log import log_info, log_warning
 
-from config import DATA_DIR, OPENAI_MODEL
+from legal_rag.config import DATA_DIR, OPENAI_MODEL
 
 PRICES_URL = os.getenv(
     "OBS_PRICES_URL",

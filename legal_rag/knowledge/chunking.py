@@ -27,12 +27,12 @@ from agno.models.openai import OpenAIResponses
 from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
-from document_catalog import (
+from legal_rag.knowledge.catalog import (
     collection_by_code,
     identify_collection,
     normalize_family_code,
 )
-from config import (
+from legal_rag.config import (
     CHUNKER_ASYNC,
     CHUNKER_CONCURRENCY,
     CHUNKING_MAX_SIZE,
@@ -40,7 +40,7 @@ from config import (
     OPENAI_MODEL,
     ROOT_DIR,
 )
-from prompts import LEGAL_CHUNKER_INSTRUCTIONS
+from legal_rag.prompts import LEGAL_CHUNKER_INSTRUCTIONS
 
 GENERIC_QUERY_WORDS = frozenset(
     {

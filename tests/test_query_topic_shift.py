@@ -10,7 +10,7 @@ from agno.run.base import RunStatus
 from agno.session.agent import AgentSession
 from agno.session.summary import SessionSummary
 
-from query_topic_shift import (
+from legal_rag.agents.topic_shift import (
     hide_prior_context,
     isolate_unrelated_query,
     looks_like_follow_up,

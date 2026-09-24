@@ -10,10 +10,10 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from obs_adapter import classify_query_class, import_session_runs
-from document_catalog import QUERY_MIX_CODES
-from obs_pricing import catalog_status, model_rates, pricing_source
-from obs_store import add_comment, list_comments, list_runs, utc_now, window_start
+from legal_rag.observability.adapter import classify_query_class, import_session_runs
+from legal_rag.knowledge.catalog import QUERY_MIX_CODES
+from legal_rag.observability.pricing import catalog_status, model_rates, pricing_source
+from legal_rag.observability.store import add_comment, list_comments, list_runs, utc_now, window_start
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from legal_chunking import build_chroma_filters, strip_workspace_path
-from query_agent import SharedCorpusKnowledgeTools, scratch_for_run
+from legal_rag.knowledge.chunking import build_chroma_filters, strip_workspace_path
+from legal_rag.agents.query import SharedCorpusKnowledgeTools, scratch_for_run
 
 
 class WorkspacePathTests(unittest.TestCase):

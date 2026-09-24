@@ -18,17 +18,24 @@ from agno.run import RunContext
 from agno.tools.knowledge import KnowledgeTools
 from agno.utils.log import log_debug, log_error
 
-from config import NUM_HISTORY_RUNS, OPENAI_MODEL, SEARCH_MAX_RESULTS, SESSIONS_DB_FILE
-from knowledge_store import get_knowledge
-from legal_chunking import (
+from legal_rag.config import NUM_HISTORY_RUNS, OPENAI_MODEL, SEARCH_MAX_RESULTS, SESSIONS_DB_FILE
+from legal_rag.knowledge.store import get_knowledge
+from legal_rag.learning.runtime import get_learning_machine
+from legal_rag.knowledge.chunking import (
     build_chroma_filters,
     document_matches_instrument,
     rank_documents,
     strip_workspace_path,
 )
-from obs_adapter import attach_observability
-from prompts import QUERY_FEW_SHOT, QUERY_INSTRUCTIONS, QUERY_TOOL_INSTRUCTIONS
-from query_topic_shift import isolate_unrelated_query, restore_query_history
+from legal_rag.observability.adapter import attach_observability
+from legal_rag.prompts import QUERY_FEW_SHOT, QUERY_INSTRUCTIONS, QUERY_TOOL_INSTRUCTIONS
+from legal_rag.agents.topic_shift import isolate_unrelated_query, restore_query_history
+
+LEARNING_RECALL = (
+    "Before answering a factual question, call search_learnings and apply any "
+    "approved lesson that fits. Those lessons are shared across sessions and "
+    "users. Do not save a learning yourself; only a reviewer can approve one."
+)
 
 
 def scratch_for_run(run_context: RunContext) -> dict:
@@ -245,6 +252,7 @@ def build_query_agent() -> Agent:
         max_tool_calls_from_history=0,
         pre_hooks=[isolate_unrelated_query],
         post_hooks=[restore_query_history],
+        learning=get_learning_machine(),
         tools=[
             SharedCorpusKnowledgeTools(
                 knowledge=knowledge,
@@ -257,5 +265,5 @@ def build_query_agent() -> Agent:
         ],
         search_knowledge=False,
         markdown=True,
-        instructions=QUERY_INSTRUCTIONS,
+        instructions=f"{QUERY_INSTRUCTIONS}\n\n{LEARNING_RECALL}",
     ))

@@ -10,24 +10,24 @@ def main() -> None:
     rest = sys.argv[2:]
 
     if mode in {"ingest", "in"}:
-        from ingest_cli import main as ingest_main
+        from legal_rag.cli.ingest import main as ingest_main
 
         sys.argv = [sys.argv[0], *rest]
         ingest_main()
         return
 
     if mode in {"query", "ask", "q"}:
-        from query_cli import main as query_main
+        from legal_rag.cli.query import main as query_main
 
         sys.argv = [sys.argv[0], *rest]
         query_main()
         return
 
     if mode in {"os", "serve", "agentos"}:
-        from agent_os import agent_os
-        from config import HOST, PORT
+        from legal_rag.server import agent_os
+        from legal_rag.config import HOST, PORT
 
-        agent_os.serve(app="agent_os:app", reload=True, host=HOST, port=PORT)
+        agent_os.serve(app="legal_rag.server:app", reload=True, host=HOST, port=PORT)
         return
 
     print("Legal RAG (Agno)")

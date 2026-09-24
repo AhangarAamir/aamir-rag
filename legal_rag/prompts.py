@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from textwrap import dedent
 
-from config import INCOMING_DIR
-from document_catalog import family_codes, family_prompt_block
+from legal_rag.config import INCOMING_DIR
+from legal_rag.knowledge.catalog import family_codes, family_prompt_block
 
 CHUNKING_INSTRUCTIONS = dedent(
     """

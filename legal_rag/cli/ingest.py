@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from ingest_agent import build_ingest_agent
+from legal_rag.agents.ingest import build_ingest_agent
 
 
 def main() -> None:

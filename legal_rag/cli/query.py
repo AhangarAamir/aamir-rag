@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sys
 
-from config import QUERY_SESSION_ID
-from query_agent import build_query_agent
+from legal_rag.config import QUERY_SESSION_ID
+from legal_rag.agents.query import build_query_agent
 
 
 def main() -> None:

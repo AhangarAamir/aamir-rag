@@ -14,10 +14,10 @@ from agno.agent import Agent
 from agno.run.agent import RunOutput
 from agno.utils.log import log_warning
 
-from config import DATA_DIR, OPENAI_MODEL, SESSIONS_DB_FILE
-from document_catalog import QUERY_MIX_CODES, identify_collection
-from obs_pricing import estimate_cost, model_rates, refresh_prices
-from obs_store import get_run, iso, list_run_ids, replace_spans, upsert_run
+from legal_rag.config import DATA_DIR, OPENAI_MODEL, SESSIONS_DB_FILE
+from legal_rag.knowledge.catalog import QUERY_MIX_CODES, identify_collection
+from legal_rag.observability.pricing import estimate_cost, model_rates, refresh_prices
+from legal_rag.observability.store import get_run, iso, list_run_ids, replace_spans, upsert_run
 
 OBS_APP = os.getenv("OBS_APP", "legal-rag").strip() or "legal-rag"
 OBS_TRACE_INNER = os.getenv("OBS_TRACE_INNER", "false").strip().lower() in {

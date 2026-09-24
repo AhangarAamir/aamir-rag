@@ -20,7 +20,7 @@ from agno.session.agent import AgentSession
 from agno.utils.log import log_debug, log_warning
 from pydantic import BaseModel, Field
 
-from config import OPENAI_MODEL
+from legal_rag.config import OPENAI_MODEL
 
 _HISTORY_GUARD = "_legal_query_history_guard"
 

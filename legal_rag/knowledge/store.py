@@ -19,7 +19,7 @@ from agno.knowledge.reader.reader_factory import ReaderFactory
 from agno.vectordb.chroma import ChromaDb
 from agno.vectordb.search import SearchType
 
-from config import (
+from legal_rag.config import (
     CHUNKING_MAX_SIZE,
     CHUNKING_STRATEGY,
     COLLECTION_NAME,
@@ -28,7 +28,7 @@ from config import (
     VECTOR_DB_DIR,
     require_api_key,
 )
-from legal_chunking import (
+from legal_rag.knowledge.chunking import (
     LegalAgenticChunking,
     LocatorChunking,
     PathAwareMarkdownReader,
@@ -36,7 +36,11 @@ from legal_chunking import (
     PathAwareTextReader,
 )
 
+LEARNINGS_COLLECTION = "legal_learnings"
+LEARNINGS_VECTOR_DB_DIR = DATA_DIR / "learnings_vectordb"
+
 _knowledge: Knowledge | None = None
+_learnings: Knowledge | None = None
 
 
 def build_chunking_strategy() -> ChunkingStrategy:
@@ -95,3 +99,26 @@ def get_knowledge() -> Knowledge:
     _attach_readers(knowledge)
     _knowledge = knowledge
     return knowledge
+
+
+def get_learnings_knowledge() -> Knowledge:
+    """Approved lessons only. Kept out of the contract corpus."""
+    global _learnings
+    if _learnings is not None:
+        return _learnings
+
+    require_api_key()
+    LEARNINGS_VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
+    _learnings = Knowledge(
+        name="Approved legal lessons",
+        description="Reviewer-approved lessons for the query agent. Not the contract corpus.",
+        contents_db=SqliteDb(db_file=str(DATA_DIR / "learnings_contents.db")),
+        vector_db=ChromaDb(
+            collection=LEARNINGS_COLLECTION,
+            path=str(LEARNINGS_VECTOR_DB_DIR),
+            persistent_client=True,
+            search_type=SearchType.hybrid,
+            embedder=OpenAIEmbedder(id=EMBEDDING_MODEL),
+        ),
+    )
+    return _learnings

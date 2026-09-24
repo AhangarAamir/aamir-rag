@@ -70,6 +70,7 @@ export function runsToMessages(runs) {
     messages.push({
       id: `${run.run_id}-assistant`,
       role: "assistant",
+      runId: run.run_id,
       content: typeof run.content === "string" ? run.content : run.content ? JSON.stringify(run.content) : "",
       tools: (run.tools || []).map((tool) => ({
         id: tool.tool_call_id || tool.tool_name,

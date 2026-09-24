@@ -8,10 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 
-from obs_adapter import classify_query_class, estimate_cost, resolve_model_id, status_from_raw
-from obs_api import _build_summary
-from config import OPENAI_MODEL
-from obs_store import add_comment, configure_db, iso, list_runs, upsert_run
+import legal_rag.observability.adapter as obs_adapter
+from legal_rag.observability.adapter import classify_query_class, estimate_cost, resolve_model_id, status_from_raw
+from legal_rag.observability.api import _build_summary
+from legal_rag.config import OPENAI_MODEL
+from legal_rag.observability.store import add_comment, configure_db, iso, list_runs, upsert_run
 
 
 class ClassifyTests(unittest.TestCase):
@@ -33,7 +34,7 @@ class ClassifyTests(unittest.TestCase):
 
 class CostTests(unittest.TestCase):
     def setUp(self):
-        from obs_pricing import reset_for_tests
+        from legal_rag.observability.pricing import reset_for_tests
 
         reset_for_tests()
 
@@ -55,17 +56,17 @@ class CostTests(unittest.TestCase):
 
 class CatalogPricingTests(unittest.TestCase):
     def setUp(self):
-        from obs_pricing import reset_for_tests
+        from legal_rag.observability.pricing import reset_for_tests
 
         reset_for_tests()
 
     def tearDown(self):
-        from obs_pricing import reset_for_tests
+        from legal_rag.observability.pricing import reset_for_tests
 
         reset_for_tests()
 
     def test_catalog_alias_lookup(self):
-        from obs_pricing import load_catalog, model_rates, pricing_source
+        from legal_rag.observability.pricing import load_catalog, model_rates, pricing_source
 
         load_catalog(
             {
@@ -84,7 +85,7 @@ class CatalogPricingTests(unittest.TestCase):
         import os
         from unittest.mock import patch
 
-        from obs_pricing import model_rates, pricing_source
+        from legal_rag.observability.pricing import model_rates, pricing_source
 
         with patch.dict(
             os.environ,
@@ -125,7 +126,7 @@ class StatusTests(unittest.TestCase):
 
 class SessionImportTests(unittest.TestCase):
     def setUp(self):
-        import obs_adapter
+        import legal_rag.observability.adapter
 
         self.tmp = TemporaryDirectory()
         configure_db(Path(self.tmp.name) / "obs.db")
@@ -197,13 +198,13 @@ class SessionImportTests(unittest.TestCase):
         obs_adapter.SESSION_IMPORT_ENABLED = True
 
     def tearDown(self):
-        import obs_adapter
+        import legal_rag.observability.adapter
 
         obs_adapter.SESSION_IMPORT_ENABLED = self._prev_import
         self.tmp.cleanup()
 
     def test_imports_completed_session_run(self):
-        from obs_adapter import import_session_runs
+        from legal_rag.observability.adapter import import_session_runs
 
         count = import_session_runs([self.sessions])
         self.assertEqual(count, 1)
@@ -217,7 +218,7 @@ class SessionImportTests(unittest.TestCase):
 
 class StoreSummaryTests(unittest.TestCase):
     def setUp(self):
-        import obs_adapter
+        import legal_rag.observability.adapter
 
         obs_adapter.SESSION_IMPORT_ENABLED = False
         self.tmp = TemporaryDirectory()
@@ -359,7 +360,7 @@ class ApiTests(StoreSummaryTests):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from obs_api import router
+        from legal_rag.observability.api import router
 
         app = FastAPI()
         app.include_router(router)

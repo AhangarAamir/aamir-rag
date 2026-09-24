@@ -11,10 +11,10 @@ from agno.db.sqlite import SqliteDb
 from agno.models.openai import OpenAIChat, OpenAIResponses
 from agno.tools.knowledge import KnowledgeManagementTools
 
-from config import OPENAI_MODEL, SESSIONS_DB_FILE
-from knowledge_store import get_knowledge
-from obs_adapter import attach_observability
-from prompts import INGEST_INSTRUCTIONS
+from legal_rag.config import OPENAI_MODEL, SESSIONS_DB_FILE
+from legal_rag.knowledge.store import get_knowledge
+from legal_rag.observability.adapter import attach_observability
+from legal_rag.prompts import INGEST_INSTRUCTIONS
 
 
 def build_ingest_agent() -> Agent:
