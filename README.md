@@ -36,7 +36,7 @@ Ingest agent never answers legal questions. Query agent never writes to the know
 ```bash
 cd legal_rag_agno
 uv sync
-cp .env.example .env   # set OPENAI_API_KEY
+cp .env.example .env   # set OPENAI_API_KEY, or LLM_PROVIDER for a compatible server
 ```
 
 Put PDFs in `data/incoming/`, using the same families as the old ingest notebook:
@@ -102,9 +102,17 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 
 | Variable | Meaning |
 |---|---|
-| `OPENAI_API_KEY` | required |
-| `OPENAI_MODEL` | default `gpt-4o` |
-| `EMBEDDING_MODEL` | default `text-embedding-3-large` |
+| `LLM_PROVIDER` | `openai` (default), `openailike`, `ollama`, `litellm`, or `vllm` |
+| `OPENAI_API_KEY` | required for `openai`. Optional for a compatible server (Ollama accepts any value) |
+| `OPENAI_MODEL` | default `gpt-4o`. For Ollama, LiteLLM, or vLLM this is the served model id |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL, required unless `LLM_PROVIDER=openai`. Example: `http://127.0.0.1:11434/v1` |
+| `OPENAI_LIKE_BACKEND` | `ollama`, `litellm`, or `vllm`. Ollama sends `think: false`. A URL on port `11434` is treated as Ollama when this is empty |
+| `OPENAI_LIKE_OPTIONS` | JSON `options` on compatible requests. Default `{"num_ctx": 32768, "num_batch": 2048}` |
+| `EMBEDDING_PROVIDER` | `openai`, `openailike`, `ollama`, `litellm`, or `vllm`. Empty follows `LLM_PROVIDER`. Ollama can embed while chat uses another provider |
+| `EMBEDDING_MODEL` | default `text-embedding-3-large`. For Ollama this is the embedding model it serves, such as `nomic-embed-text` |
+| `EMBEDDING_BASE_URL` | embedding server. Ollama defaults to `http://127.0.0.1:11434`, or reuses `OPENAI_BASE_URL` when chat is Ollama. Other compatible providers reuse `OPENAI_BASE_URL` |
+| `EMBEDDING_API_KEY` | optional embedding key. Falls back to `OPENAI_API_KEY` |
+| `EMBEDDING_DIMENSIONS` | vector size. Required for Ollama and must match the model (`nomic-embed-text` is 768) |
 | `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
 | `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
 | `CHUNKER_ASYNC` | `true` (default): recursive split + parallel `agent.arun` labels |

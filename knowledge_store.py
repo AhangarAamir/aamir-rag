@@ -13,7 +13,6 @@ from agno.db.sqlite import SqliteDb
 from agno.knowledge.chunking.document import DocumentChunking
 from agno.knowledge.chunking.recursive import RecursiveChunking
 from agno.knowledge.chunking.strategy import ChunkingStrategy
-from agno.knowledge.embedder.openai import OpenAIEmbedder
 from agno.knowledge.knowledge import Knowledge
 from agno.knowledge.reader.reader_factory import ReaderFactory
 from agno.vectordb.chroma import ChromaDb
@@ -24,8 +23,8 @@ from config import (
     CHUNKING_STRATEGY,
     COLLECTION_NAME,
     DATA_DIR,
-    EMBEDDING_MODEL,
     VECTOR_DB_DIR,
+    build_embedder,
     require_api_key,
 )
 from legal_chunking import (
@@ -89,7 +88,7 @@ def get_knowledge() -> Knowledge:
             path=str(VECTOR_DB_DIR),
             persistent_client=True,
             search_type=SearchType.hybrid,
-            embedder=OpenAIEmbedder(id=EMBEDDING_MODEL),
+            embedder=build_embedder(),
         ),
     )
     _attach_readers(knowledge)
