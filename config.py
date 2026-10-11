@@ -108,6 +108,63 @@ def strip_openai_v1(url: str) -> str:
     return value
 
 
+_CACHE_MISS_MARKERS = (
+    "local_files_only",
+    "cached snapshot",
+    "cached files",
+    "outgoing traffic has been disabled",
+    "couldn't connect",
+    "cannot find the requested files",
+    "not the path to a directory",
+)
+
+
+def is_missing_cached_model(exc: BaseException) -> bool:
+    if type(exc).__name__ == "LocalEntryNotFoundError":
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _CACHE_MISS_MARKERS)
+
+
+def huggingface_model_cache_dir() -> Path:
+    return DATA_DIR / "models"
+
+
+def load_cached_sentence_transformer(model_id: str, cache_dir: Path, loader: Any):
+    """Use the files already in cache_dir. Download only when they are absent."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _construct(*, local_files_only: bool) -> Any:
+        folder = str(cache_dir)
+        attempts = [
+            {
+                "cache_folder": folder,
+                "local_files_only": local_files_only,
+                "trust_remote_code": True,
+            },
+            {"cache_folder": folder, "local_files_only": local_files_only},
+            {"cache_folder": folder},
+        ]
+        last_type_error: TypeError | None = None
+        for kwargs in attempts:
+            try:
+                return loader(model_id, **kwargs)
+            except TypeError as exc:
+                last_type_error = exc
+        if last_type_error is None:
+            raise RuntimeError(f"Could not load Hugging Face model {model_id}.")
+        raise last_type_error
+
+    try:
+        return _construct(local_files_only=True)
+    except TypeError:
+        return loader(model_id, cache_folder=str(cache_dir))
+    except Exception as exc:
+        if not is_missing_cached_model(exc):
+            raise
+        return _construct(local_files_only=False)
+
+
 def ollama_embed_host(
     embedding_base_url: str,
     chat_base_url: str,
@@ -336,10 +393,11 @@ def build_embedder():
                 "Hugging Face embeddings need sentence-transformers. "
                 "Install it with `uv add sentence-transformers`."
             ) from exc
-        try:
-            client = SentenceTransformer(EMBEDDING_MODEL, trust_remote_code=True)
-        except TypeError:
-            client = SentenceTransformer(EMBEDDING_MODEL)
+        client = load_cached_sentence_transformer(
+            EMBEDDING_MODEL,
+            huggingface_model_cache_dir(),
+            SentenceTransformer,
+        )
         return SentenceTransformerEmbedder(
             id=EMBEDDING_MODEL,
             dimensions=EMBEDDING_DIMENSIONS,

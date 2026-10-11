@@ -56,6 +56,34 @@ class LlmProviderTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             config.normalize_llm_provider("huggingface")
 
+    def test_huggingface_model_loads_from_cache_without_downloading_again(self) -> None:
+        calls: list[dict] = []
+        stored = {"ready": False}
+
+        def loader(model_id: str, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get("local_files_only") and not stored["ready"]:
+                raise OSError(
+                    "Cannot find the requested files in the disk cache and "
+                    "outgoing traffic has been disabled."
+                )
+            if kwargs.get("local_files_only") is False:
+                stored["ready"] = True
+            return model_id
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = config.Path(tmp)
+            config.load_cached_sentence_transformer("Alibaba-NLP/gte-base-en-v1.5", cache, loader)
+            config.load_cached_sentence_transformer("Alibaba-NLP/gte-base-en-v1.5", cache, loader)
+
+        self.assertEqual(
+            [call["local_files_only"] for call in calls],
+            [True, False, True],
+        )
+        self.assertTrue(all(call["cache_folder"] == tmp for call in calls))
+
     def test_ollama_embed_host_strips_v1(self) -> None:
         self.assertEqual(
             config.ollama_embed_host(
