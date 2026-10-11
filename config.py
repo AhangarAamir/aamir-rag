@@ -33,6 +33,16 @@ _PROVIDER_ALIASES = {
     "litellm": "litellm",
     "vllm": "vllm",
 }
+_EMBEDDING_PROVIDER_ALIASES = {
+    **_PROVIDER_ALIASES,
+    "huggingface": "huggingface",
+    "hugging-face": "huggingface",
+    "hugging_face": "huggingface",
+    "hf": "huggingface",
+    "sentence-transformers": "huggingface",
+    "sentence_transformers": "huggingface",
+    "sentencetransformer": "huggingface",
+}
 _DEFAULT_OPENAI_LIKE_OPTIONS = {"num_ctx": 32768, "num_batch": 2048}
 
 
@@ -82,7 +92,13 @@ def resolve_embedding_provider(raw: str | None, llm_provider: str) -> str:
     """Empty embedding provider follows the chat provider."""
     if raw is None or not raw.strip():
         return llm_provider
-    return normalize_llm_provider(raw)
+    provider = _EMBEDDING_PROVIDER_ALIASES.get(raw.strip().lower())
+    if provider is None:
+        raise RuntimeError(
+            "EMBEDDING_PROVIDER must be openai, openailike, ollama, litellm, "
+            "vllm, or huggingface."
+        )
+    return provider
 
 
 def strip_openai_v1(url: str) -> str:
@@ -222,11 +238,19 @@ def require_api_key() -> None:
         return
     if not EMBEDDING_MODEL:
         raise RuntimeError("EMBEDDING_MODEL is required.")
-    if EMBEDDING_PROVIDER == "ollama":
+    if EMBEDDING_PROVIDER in {"ollama", "huggingface"}:
         if EMBEDDING_DIMENSIONS is None:
+            if EMBEDDING_PROVIDER == "ollama":
+                hint = "nomic-embed-text is 768, all-minilm is 384."
+            else:
+                hint = (
+                    "sentence-transformers/all-MiniLM-L6-v2 is 384, "
+                    "Alibaba-NLP/gte-base-en-v1.5 is 768, "
+                    "Alibaba-NLP/gte-large-en-v1.5 is 1024."
+                )
             raise RuntimeError(
-                "EMBEDDING_DIMENSIONS is required when EMBEDDING_PROVIDER is ollama. "
-                "It must match that model (nomic-embed-text is 768)."
+                "EMBEDDING_DIMENSIONS is required when EMBEDDING_PROVIDER is "
+                f"{EMBEDDING_PROVIDER}. It must match that model ({hint})"
             )
         return
     if not EMBEDDING_BASE_URL and not (LLM_PROVIDER != "openai" and OPENAI_BASE_URL):
@@ -296,6 +320,30 @@ def build_embedder():
                 OPENAI_BASE_URL,
                 chat_is_ollama=chat_is_ollama,
             ),
+        )
+
+    if EMBEDDING_PROVIDER == "huggingface":
+        if EMBEDDING_DIMENSIONS is None:
+            raise RuntimeError(
+                "EMBEDDING_DIMENSIONS is required when EMBEDDING_PROVIDER is huggingface."
+            )
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            from agno.knowledge.embedder.sentence_transformer import SentenceTransformerEmbedder
+        except ImportError as exc:
+            raise RuntimeError(
+                "Hugging Face embeddings need sentence-transformers. "
+                "Install it with `uv add sentence-transformers`."
+            ) from exc
+        try:
+            client = SentenceTransformer(EMBEDDING_MODEL, trust_remote_code=True)
+        except TypeError:
+            client = SentenceTransformer(EMBEDDING_MODEL)
+        return SentenceTransformerEmbedder(
+            id=EMBEDDING_MODEL,
+            dimensions=EMBEDDING_DIMENSIONS,
+            sentence_transformer_client=client,
         )
 
     from agno.knowledge.embedder.openai_like import OpenAILikeEmbedder

@@ -51,6 +51,10 @@ class LlmProviderTests(unittest.TestCase):
         self.assertEqual(config.resolve_embedding_provider(None, "ollama"), "ollama")
         self.assertEqual(config.resolve_embedding_provider("  ", "openai"), "openai")
         self.assertEqual(config.resolve_embedding_provider("ollama", "openai"), "ollama")
+        self.assertEqual(config.resolve_embedding_provider("HuggingFace", "openai"), "huggingface")
+        self.assertEqual(config.resolve_embedding_provider("hf", "ollama"), "huggingface")
+        with self.assertRaises(RuntimeError):
+            config.normalize_llm_provider("huggingface")
 
     def test_ollama_embed_host_strips_v1(self) -> None:
         self.assertEqual(
@@ -178,6 +182,17 @@ class LlmProviderTests(unittest.TestCase):
             ):
                 with self.assertRaises(RuntimeError):
                     config.require_api_key()
+            with _patched_provider(
+                provider="ollama",
+                model_id="qwen3.5:2b",
+                api_key="",
+                base_url="http://127.0.0.1:11434/v1",
+                embedding_provider="huggingface",
+                embedding_model="Alibaba-NLP/gte-base-en-v1.5",
+            ):
+                with self.assertRaises(RuntimeError) as missing_dims:
+                    config.require_api_key()
+                self.assertIn("EMBEDDING_DIMENSIONS", str(missing_dims.exception))
         finally:
             if previous is None:
                 os.environ.pop("OPENAI_API_KEY", None)
