@@ -265,4 +265,5 @@ def build_query_agent() -> Agent:
         search_knowledge=False,
         markdown=True,
         instructions=f"{QUERY_INSTRUCTIONS}\n\n{LEARNING_RECALL}",
+        tool_choice="auto"
     ))
