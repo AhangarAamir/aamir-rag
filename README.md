@@ -103,13 +103,14 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | Variable | Meaning |
 |---|---|
 | `LLM_PROVIDER` | `openai` (default), `openailike`, `ollama`, `litellm`, or `vllm` |
+| `REQUEST_TIMEOUT_SECONDS` | chat and embedding request timeout for every provider (default `300`, 5 minutes) |
 | `OPENAI_API_KEY` | required for `openai`. Optional for a compatible server (Ollama accepts any value) |
 | `OPENAI_MODEL` | default `gpt-4o`. For Ollama, LiteLLM, or vLLM this is the served model id |
 | `OPENAI_BASE_URL` | OpenAI-compatible base URL, required unless `LLM_PROVIDER=openai`. Example: `http://127.0.0.1:11434/v1` |
 | `OPENAI_LIKE_BACKEND` | `ollama`, `litellm`, or `vllm`. Ollama sends `think: false`. A URL on port `11434` is treated as Ollama when this is empty |
 | `OPENAI_LIKE_OPTIONS` | JSON `options` on compatible requests. Default `{"num_ctx": 32768, "num_batch": 2048}` |
 | `EMBEDDING_PROVIDER` | `openai`, `openailike`, `ollama`, `litellm`, `vllm`, or `huggingface`. Empty follows `LLM_PROVIDER` |
-| `EMBEDDING_MODEL` | model id for that provider. Hugging Face examples: `sentence-transformers/all-MiniLM-L6-v2`, `Alibaba-NLP/gte-base-en-v1.5`. The weights download once into `data/models` and later runs load that copy |
+| `EMBEDDING_MODEL` | model id for that provider. Hugging Face examples: `sentence-transformers/all-MiniLM-L6-v2`, `Alibaba-NLP/gte-base-en-v1.5`. Weights download once into `data/models`, later runs load that copy, and inference stays on CPU |
 | `EMBEDDING_BASE_URL` | embedding server. Ollama defaults to `http://127.0.0.1:11434`, or reuses `OPENAI_BASE_URL` when chat is Ollama. Unused for `huggingface` |
 | `EMBEDDING_API_KEY` | optional embedding key. Falls back to `OPENAI_API_KEY`. Unused for local Hugging Face models |
 | `EMBEDDING_DIMENSIONS` | vector size. Required for Ollama and Hugging Face. all-MiniLM is 384, Alibaba gte-base is 768, gte-large is 1024 |

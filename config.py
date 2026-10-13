@@ -136,14 +136,11 @@ def load_cached_sentence_transformer(model_id: str, cache_dir: Path, loader: Any
 
     def _construct(*, local_files_only: bool) -> Any:
         folder = str(cache_dir)
+        cpu = {"cache_folder": folder, "device": "cpu"}
         attempts = [
-            {
-                "cache_folder": folder,
-                "local_files_only": local_files_only,
-                "trust_remote_code": True,
-            },
-            {"cache_folder": folder, "local_files_only": local_files_only},
-            {"cache_folder": folder},
+            {**cpu, "local_files_only": local_files_only, "trust_remote_code": True},
+            {**cpu, "local_files_only": local_files_only},
+            cpu,
         ]
         last_type_error: TypeError | None = None
         for kwargs in attempts:
@@ -158,7 +155,7 @@ def load_cached_sentence_transformer(model_id: str, cache_dir: Path, loader: Any
     try:
         return _construct(local_files_only=True)
     except TypeError:
-        return loader(model_id, cache_folder=str(cache_dir))
+        return loader(model_id, cache_folder=str(cache_dir), device="cpu")
     except Exception as exc:
         if not is_missing_cached_model(exc):
             raise
@@ -178,6 +175,9 @@ def ollama_embed_host(
         return strip_openai_v1(chat_base_url)
     return "http://127.0.0.1:11434"
 
+
+# Chat and embedding HTTP calls. Covers connect and read, including a busy vLLM server.
+REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "300"))
 
 LLM_PROVIDER = normalize_llm_provider(os.getenv("LLM_PROVIDER"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -322,7 +322,7 @@ def build_chat_model():
     if LLM_PROVIDER == "openai":
         from agno.models.openai import OpenAIResponses
 
-        return OpenAIResponses(id=OPENAI_MODEL)
+        return OpenAIResponses(id=OPENAI_MODEL, timeout=REQUEST_TIMEOUT_SECONDS)
 
     from agno.models.openai.like import OpenAILike
 
@@ -333,6 +333,7 @@ def build_chat_model():
         api_key=OPENAI_API_KEY or "not-provided",
         base_url=OPENAI_BASE_URL,
         provider="OpenAILike",
+        timeout=REQUEST_TIMEOUT_SECONDS,
         extra_body=extra_body or None,
     )
 
@@ -342,7 +343,10 @@ def build_embedder():
     if EMBEDDING_PROVIDER == "openai":
         from agno.knowledge.embedder.openai import OpenAIEmbedder
 
-        kwargs: dict[str, Any] = {"id": EMBEDDING_MODEL}
+        kwargs: dict[str, Any] = {
+            "id": EMBEDDING_MODEL,
+            "client_params": {"timeout": REQUEST_TIMEOUT_SECONDS},
+        }
         key = EMBEDDING_API_KEY or OPENAI_API_KEY
         if key:
             kwargs["api_key"] = key
@@ -372,6 +376,7 @@ def build_embedder():
         return OllamaEmbedder(
             id=EMBEDDING_MODEL,
             dimensions=EMBEDDING_DIMENSIONS,
+            timeout=REQUEST_TIMEOUT_SECONDS,
             host=ollama_embed_host(
                 EMBEDDING_BASE_URL,
                 OPENAI_BASE_URL,
@@ -411,6 +416,7 @@ def build_embedder():
         "id": EMBEDDING_MODEL,
         "api_key": EMBEDDING_API_KEY or OPENAI_API_KEY or "not-provided",
         "base_url": base_url,
+        "client_params": {"timeout": REQUEST_TIMEOUT_SECONDS},
     }
     if EMBEDDING_DIMENSIONS is not None:
         kwargs["dimensions"] = EMBEDDING_DIMENSIONS

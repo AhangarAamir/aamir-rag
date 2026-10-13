@@ -83,6 +83,7 @@ class LlmProviderTests(unittest.TestCase):
             [True, False, True],
         )
         self.assertTrue(all(call["cache_folder"] == tmp for call in calls))
+        self.assertTrue(all(call["device"] == "cpu" for call in calls))
 
     def test_ollama_embed_host_strips_v1(self) -> None:
         self.assertEqual(
@@ -116,6 +117,7 @@ class LlmProviderTests(unittest.TestCase):
             model = config.build_chat_model()
         self.assertIsInstance(model, OpenAIResponses)
         self.assertEqual(model.id, "gpt-4o")
+        self.assertEqual(model.timeout, 300)
 
     def test_ollama_model_sends_options_and_disables_thinking(self) -> None:
         with _patched_provider(
@@ -133,6 +135,8 @@ class LlmProviderTests(unittest.TestCase):
         self.assertEqual(model.id, "qwen3:32b")
         self.assertEqual(model.api_key, "not-provided")
         self.assertEqual(model.base_url, "http://127.0.0.1:11434/v1")
+        self.assertEqual(model.timeout, 300)
+        self.assertEqual(embedder.timeout, 300)
         extra = model.get_request_params()["extra_body"]
         self.assertEqual(extra["options"], {"num_ctx": 32768, "num_batch": 2048})
         self.assertIs(extra["think"], False)
@@ -163,6 +167,7 @@ class LlmProviderTests(unittest.TestCase):
             embedder = config.build_embedder()
         self.assertIsInstance(embedder, OpenAIEmbedder)
         self.assertEqual(embedder.id, "text-embedding-3-large")
+        self.assertEqual(embedder.client_params["timeout"], 300)
 
     def test_litellm_model_omits_think(self) -> None:
         with _patched_provider(
@@ -178,6 +183,8 @@ class LlmProviderTests(unittest.TestCase):
         extra = model.get_request_params()["extra_body"]
         self.assertNotIn("think", extra)
         self.assertEqual(model.api_key, "sk-local")
+        self.assertEqual(model.timeout, 300)
+        self.assertEqual(embedder.client_params["timeout"], 300)
         self.assertIsInstance(embedder, OpenAILikeEmbedder)
         self.assertEqual(embedder.dimensions, 768)
         self.assertEqual(embedder.base_url, "http://127.0.0.1:4000/v1")
