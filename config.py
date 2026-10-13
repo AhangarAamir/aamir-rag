@@ -269,6 +269,24 @@ def _quiet_openai_httpx_finalizers() -> None:
 _quiet_openai_httpx_finalizers()
 
 
+def enable_provider_error_tracebacks() -> None:
+    """Print the full stack when a provider or agent run fails.
+
+    Agno otherwise logs only str(exception). vLLM errors often have an empty
+    message, which shows up as "Error from OpenAI API:" with nothing after it.
+    """
+    from agno.utils.log import agent_logger, set_log_tracebacks, team_logger, workflow_logger
+
+    set_log_tracebacks(True)
+    for current in (agent_logger, team_logger, workflow_logger):
+        for handler in getattr(current, "handlers", ()):
+            if hasattr(handler, "rich_tracebacks"):
+                handler.rich_tracebacks = True
+
+
+enable_provider_error_tracebacks()
+
+
 def require_api_key() -> None:
     if LLM_PROVIDER == "openai":
         if not OPENAI_API_KEY:

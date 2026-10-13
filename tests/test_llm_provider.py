@@ -14,6 +14,11 @@ from agno.models.openai.like import OpenAILike
 
 
 class LlmProviderTests(unittest.TestCase):
+    def test_provider_errors_include_tracebacks(self) -> None:
+        from agno.utils.log import agent_logger, log_tracebacks
+
+        self.assertTrue(log_tracebacks)
+        self.assertTrue(any(getattr(handler, "rich_tracebacks", False) for handler in agent_logger.handlers))
     def test_provider_aliases(self) -> None:
         self.assertEqual(config.normalize_llm_provider("openai"), "openai")
         self.assertEqual(config.normalize_llm_provider("OpenAI-Like"), "openailike")

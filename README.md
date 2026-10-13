@@ -103,7 +103,7 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | Variable | Meaning |
 |---|---|
 | `LLM_PROVIDER` | `openai` (default), `openailike`, `ollama`, `litellm`, or `vllm` |
-| `REQUEST_TIMEOUT_SECONDS` | chat and embedding request timeout for every provider (default `300`, 5 minutes) |
+| `REQUEST_TIMEOUT_SECONDS` | chat and embedding request timeout for every provider (default `300`, 5 minutes). Provider failures print the full Python traceback |
 | `OPENAI_API_KEY` | required for `openai`. Optional for a compatible server (Ollama accepts any value) |
 | `OPENAI_MODEL` | default `gpt-4o`. For Ollama, LiteLLM, or vLLM this is the served model id |
 | `OPENAI_BASE_URL` | OpenAI-compatible base URL, required unless `LLM_PROVIDER=openai`. Example: `http://127.0.0.1:11434/v1` |
