@@ -20,7 +20,7 @@ from agno.session.agent import AgentSession
 from agno.utils.log import log_debug, log_warning
 from pydantic import BaseModel, Field
 
-from legal_rag.config import OPENAI_MODEL
+from legal_rag.config import build_chat_model
 
 _HISTORY_GUARD = "_legal_query_history_guard"
 
@@ -121,12 +121,11 @@ def _get_classifier_agent():
     global _classifier_agent
     if _classifier_agent is None:
         from agno.agent import Agent
-        from agno.models.openai import OpenAIResponses
 
         _classifier_agent = Agent(
             id="query-topic-shift",
             name="Query Topic Shift Classifier",
-            model=OpenAIResponses(id=OPENAI_MODEL),
+            model=build_chat_model(),
             output_schema=QueryRelation,
             instructions=_CLASSIFIER_INSTRUCTIONS,
             markdown=False,

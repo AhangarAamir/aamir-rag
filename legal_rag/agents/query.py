@@ -13,12 +13,11 @@ from typing import List, Optional
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
 from agno.knowledge.document import Document
-from agno.models.openai import OpenAIResponses
 from agno.run import RunContext
 from agno.tools.knowledge import KnowledgeTools
 from agno.utils.log import log_debug, log_error
 
-from legal_rag.config import NUM_HISTORY_RUNS, OPENAI_MODEL, SEARCH_MAX_RESULTS, SESSIONS_DB_FILE
+from legal_rag.config import NUM_HISTORY_RUNS, SEARCH_MAX_RESULTS, SESSIONS_DB_FILE, build_chat_model
 from legal_rag.knowledge.store import get_knowledge
 from legal_rag.learning.runtime import get_learning_machine
 from legal_rag.knowledge.chunking import (
@@ -239,7 +238,7 @@ def build_query_agent() -> Agent:
     return attach_observability(Agent(
         id="query-agent",
         name="Query Agent",
-        model=OpenAIResponses(id=OPENAI_MODEL),
+        model=build_chat_model(),
         db=SqliteDb(
             id="query-sessions-db",
             db_file=str(SESSIONS_DB_FILE),

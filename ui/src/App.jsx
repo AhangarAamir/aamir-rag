@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getSessionRuns, listSessions, runQuery, runsToMessages } from "./api.js";
-import { getUserId, newSessionId } from "./storage.js";
+import { getUserId, newSessionId, randomId } from "./storage.js";
 
 function toolLabel(name) {
   if (name === "think") return "Thinking";
@@ -202,12 +202,12 @@ export default function App() {
     const attached = files;
     const messageText = text || (attached.length ? "Please review the attached file(s)." : "");
     const userMessage = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       role: "user",
       content: text,
       files: attached.map((f) => f.name),
     };
-    const assistantId = crypto.randomUUID();
+    const assistantId = randomId();
     assistantRef.current = {
       id: assistantId,
       role: "assistant",

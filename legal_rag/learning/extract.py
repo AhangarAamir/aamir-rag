@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any, Callable
 
-from legal_rag.config import OPENAI_MODEL, ROOT_DIR, require_api_key
+from legal_rag.config import ROOT_DIR, build_chat_model, require_api_key
 
 SEVERITIES = {"low", "medium", "high", "critical"}
 _SKIP_DIRS = {".venv", "node_modules", "dist", "data", "__pycache__", ".git"}
@@ -80,9 +80,8 @@ def build_prompt(
 def _model_text(prompt: str) -> str:
     require_api_key()
     from agno.models.message import Message
-    from agno.models.openai import OpenAIResponses
 
-    model = OpenAIResponses(id=OPENAI_MODEL)
+    model = build_chat_model()
     response = model.response(
         messages=[
             Message(role="system", content=EXTRACT_SYSTEM),

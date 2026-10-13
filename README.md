@@ -102,9 +102,18 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 
 | Variable | Meaning |
 |---|---|
-| `OPENAI_API_KEY` | required |
-| `OPENAI_MODEL` | default `gpt-5.6-luna` |
-| `EMBEDDING_MODEL` | default `text-embedding-3-large` |
+| `LLM_PROVIDER` | `openai` (default), `openailike`, `ollama`, `litellm`, or `vllm` |
+| `OPENAI_API_KEY` | required for `openai`. Optional for a compatible server |
+| `OPENAI_MODEL` | default `gpt-5.6-luna`. For Ollama, LiteLLM, or vLLM this is the served model id |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL, required unless `LLM_PROVIDER=openai` |
+| `OPENAI_LIKE_BACKEND` | `ollama`, `litellm`, or `vllm`. Ollama sends `think: false` |
+| `OPENAI_LIKE_OPTIONS` | JSON `options` on compatible requests. Default `{"num_ctx": 32768, "num_batch": 2048}` |
+| `REQUEST_TIMEOUT_SECONDS` | chat and embedding timeout for every provider (default `300`). Failures print a full traceback |
+| `EMBEDDING_PROVIDER` | `openai`, `openailike`, `ollama`, `litellm`, `vllm`, or `huggingface`. Empty follows `LLM_PROVIDER` |
+| `EMBEDDING_MODEL` | model id for that provider. Hugging Face weights download once into `data/models` and run on CPU |
+| `EMBEDDING_BASE_URL` | embedding server. Unused for local Hugging Face models |
+| `EMBEDDING_API_KEY` | optional embedding key. Falls back to `OPENAI_API_KEY` |
+| `EMBEDDING_DIMENSIONS` | vector size. Required for Ollama and Hugging Face |
 | `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
 | `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
 | `CHUNKER_ASYNC` | `true` (default): recursive split + parallel `agent.arun` labels |

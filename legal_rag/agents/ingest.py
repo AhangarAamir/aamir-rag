@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
-from agno.models.openai import OpenAIChat, OpenAIResponses
 from agno.tools.knowledge import KnowledgeManagementTools
 
-from legal_rag.config import OPENAI_MODEL, SESSIONS_DB_FILE
+from legal_rag.config import SESSIONS_DB_FILE, build_chat_model
 from legal_rag.knowledge.store import get_knowledge
 from legal_rag.observability.adapter import attach_observability
 from legal_rag.prompts import INGEST_INSTRUCTIONS
@@ -22,7 +21,7 @@ def build_ingest_agent() -> Agent:
     return attach_observability(Agent(
         id="ingest-agent",
         name="Ingest Agent",
-        model=OpenAIResponses(id=OPENAI_MODEL),
+        model=build_chat_model(),
         db=SqliteDb(
             id="ingest-sessions-db",
             db_file=str(SESSIONS_DB_FILE),
