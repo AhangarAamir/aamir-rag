@@ -89,6 +89,7 @@ class LlmProviderTests(unittest.TestCase):
         )
         self.assertTrue(all(call["cache_folder"] == tmp for call in calls))
         self.assertTrue(all(call["device"] == "cpu" for call in calls))
+        self.assertTrue(all(call["config_kwargs"]["unpad_inputs"] is False for call in calls))
 
     def test_huggingface_cpu_wrapper_skips_prompt_offset(self) -> None:
         calls: list[dict] = []

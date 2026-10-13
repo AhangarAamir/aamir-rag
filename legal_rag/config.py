@@ -178,11 +178,19 @@ class CpuSentenceTransformer:
 
 
 def _cpu_model_kwargs() -> dict[str, Any]:
+    """GTE v1.5 packs tokens by default. On CPU that index is corrupt, so every chunk fails."""
+    packed: dict[str, Any] = {
+        "config_kwargs": {
+            "unpad_inputs": False,
+            "use_memory_efficient_attention": False,
+        },
+    }
     try:
         import torch
     except ImportError:
-        return {}
-    return {"model_kwargs": {"torch_dtype": torch.float32}}
+        return packed
+    packed["model_kwargs"] = {"torch_dtype": torch.float32}
+    return packed
 
 
 def load_cached_sentence_transformer(model_id: str, cache_dir: Path, loader: Any):
