@@ -189,6 +189,24 @@ class LlmProviderTests(unittest.TestCase):
         healthy.buffer = _Buffer([0, 1], (1, 2))
         self.assertEqual(config.repair_gte_position_ids(healthy, torch_module=_Torch()), 0)
 
+    def test_gte_model_receives_the_mask_helper_transformers_5_removed(self) -> None:
+        class _Config:
+            is_decoder = False
+            model_type = "new"
+            unpad_inputs = False
+
+        class NewModel:
+            def __init__(self) -> None:
+                self.config = _Config()
+
+            def modules(self):
+                yield self
+
+        model = NewModel()
+        config.restore_gte_attention_helpers(model)
+        self.assertTrue(callable(model.get_extended_attention_mask))
+        self.assertEqual(model.get_head_mask(None, 3), [None, None, None])
+
     def test_ollama_embed_host_strips_v1(self) -> None:
         self.assertEqual(
             config.ollama_embed_host(

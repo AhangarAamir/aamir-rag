@@ -197,12 +197,79 @@ def repair_gte_position_ids(model: Any, torch_module: Any | None = None) -> int:
     return repaired
 
 
+def _is_gte_module(module: Any) -> bool:
+    if type(module).__name__ in {"NewModel", "NewPreTrainedModel"}:
+        return True
+    config = getattr(module, "config", None)
+    if getattr(config, "model_type", None) == "new":
+        return True
+    return hasattr(config, "unpad_inputs")
+
+
+def _get_extended_attention_mask(self: Any, attention_mask: Any, input_shape: Any = None, device: Any = None, dtype: Any = None) -> Any:
+    """Encoder mask helper removed from Transformers 5. GTE's NewModel still calls it."""
+    del input_shape, device
+    import torch
+
+    if dtype is None:
+        dtype = getattr(self, "dtype", None)
+    if dtype is None:
+        try:
+            dtype = next(self.parameters()).dtype
+        except (StopIteration, AttributeError):
+            dtype = torch.float32
+    if attention_mask.dim() == 3:
+        extended = attention_mask[:, None, :, :]
+    elif attention_mask.dim() == 2:
+        extended = attention_mask[:, None, None, :]
+    else:
+        raise ValueError(
+            f"Wrong shape for attention_mask {tuple(attention_mask.shape)}; expected 2 or 3 dimensions."
+        )
+    extended = extended.to(dtype=dtype)
+    return (1.0 - extended) * torch.finfo(dtype).min
+
+
+def _get_head_mask(self: Any, head_mask: Any, num_hidden_layers: int, is_attention_chunked: bool = False) -> Any:
+    """Layer head mask helper removed from Transformers 5. GTE calls it right after the attention mask."""
+    del self
+    if head_mask is None:
+        return [None] * num_hidden_layers
+    if is_attention_chunked:
+        return head_mask.unsqueeze(-1)
+    return head_mask
+
+
+def restore_gte_attention_helpers(model: Any) -> None:
+    """Bind the Transformers 4 mask helpers Alibaba's remote code still calls."""
+    candidates: list[Any] = []
+    modules = getattr(model, "modules", None)
+    if callable(modules):
+        candidates.extend(modules())
+    auto_model = getattr(model, "auto_model", None)
+    if auto_model is not None:
+        candidates.append(auto_model)
+    if not candidates:
+        candidates.append(model)
+    seen: set[int] = set()
+    for module in candidates:
+        if not _is_gte_module(module):
+            continue
+        cls = type(module)
+        if id(cls) in seen:
+            continue
+        seen.add(id(cls))
+        if not hasattr(cls, "get_extended_attention_mask"):
+            cls.get_extended_attention_mask = _get_extended_attention_mask
+        if not hasattr(cls, "get_head_mask"):
+            cls.get_head_mask = _get_head_mask
+
+
 class CpuSentenceTransformer:
     """Run a Hugging Face embedder on CPU in float32, without a prompt offset.
 
-    Alibaba GTE keeps position ids in a buffer that is not saved with the weights.
-    Transformers 5 does not restore it, so encode indexes the sequence with garbage
-    and raises "index ... is out of bounds for dimension 0".
+    Alibaba GTE was written for Transformers 4. Version 5 drops get_extended_attention_mask
+    and does not restore the unsaved position-id buffer, so encode fails before any vector is returned.
     """
 
     def __init__(self, model: Any) -> None:
@@ -221,6 +288,7 @@ class CpuSentenceTransformer:
         if isinstance(prompts, dict):
             model.prompts = {}
         repair_gte_position_ids(model)
+        restore_gte_attention_helpers(model)
         self._model = model
 
     def encode(self, sentences: Any, prompt: str | None = None, normalize_embeddings: bool = False, **kwargs: Any):
