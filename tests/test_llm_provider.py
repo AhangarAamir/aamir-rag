@@ -90,6 +90,36 @@ class LlmProviderTests(unittest.TestCase):
         self.assertTrue(all(call["cache_folder"] == tmp for call in calls))
         self.assertTrue(all(call["device"] == "cpu" for call in calls))
 
+    def test_huggingface_cpu_wrapper_skips_prompt_offset(self) -> None:
+        calls: list[dict] = []
+
+        class _Model:
+            default_prompt_name = "query"
+            prompts = {"query": "query: "}
+
+            def to(self, device: str) -> None:
+                calls.append({"to": device})
+
+            def float(self) -> None:
+                calls.append({"float": True})
+
+            def eval(self) -> None:
+                calls.append({"eval": True})
+
+            def encode(self, sentences, **kwargs):
+                calls.append({"sentences": sentences, **kwargs})
+                return [0.1, 0.2]
+
+        wrapped = config.CpuSentenceTransformer(_Model())
+        wrapped.encode("clause 10", prompt="query: ", normalize_embeddings=True)
+        self.assertIsNone(wrapped._model.default_prompt_name)
+        self.assertEqual(wrapped._model.prompts, {})
+        encoded = calls[-1]
+        self.assertEqual(encoded["sentences"], "clause 10")
+        self.assertNotIn("prompt", encoded)
+        self.assertNotIn("prompt_name", encoded)
+        self.assertTrue(encoded["normalize_embeddings"])
+
     def test_ollama_embed_host_strips_v1(self) -> None:
         self.assertEqual(
             config.ollama_embed_host(

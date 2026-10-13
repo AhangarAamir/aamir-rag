@@ -130,17 +130,72 @@ def huggingface_model_cache_dir() -> Path:
     return DATA_DIR / "models"
 
 
+class CpuSentenceTransformer:
+    """Run a Hugging Face embedder on CPU in float32, without a prompt offset.
+
+    Alibaba GTE and similar models keep a prompt length and use it as an index
+    into the token sequence. On CPU that index is garbage, which shows up as
+    "index ... is out of bounds for dimension 0".
+    """
+
+    def __init__(self, model: Any) -> None:
+        move = getattr(model, "to", None)
+        if callable(move):
+            move("cpu")
+        as_float = getattr(model, "float", None)
+        if callable(as_float):
+            as_float()
+        mark_eval = getattr(model, "eval", None)
+        if callable(mark_eval):
+            mark_eval()
+        if hasattr(model, "default_prompt_name"):
+            model.default_prompt_name = None
+        prompts = getattr(model, "prompts", None)
+        if isinstance(prompts, dict):
+            model.prompts = {}
+        self._model = model
+
+    def encode(self, sentences: Any, prompt: str | None = None, normalize_embeddings: bool = False, **kwargs: Any):
+        del prompt
+        kwargs.pop("prompt_name", None)
+        try:
+            return self._model.encode(
+                sentences,
+                normalize_embeddings=normalize_embeddings,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+                **kwargs,
+            )
+        except TypeError:
+            return self._model.encode(sentences, normalize_embeddings=normalize_embeddings)
+
+    def to(self, device: str) -> "CpuSentenceTransformer":
+        del device
+        move = getattr(self._model, "to", None)
+        if callable(move):
+            move("cpu")
+        return self
+
+
+def _cpu_model_kwargs() -> dict[str, Any]:
+    try:
+        import torch
+    except ImportError:
+        return {}
+    return {"model_kwargs": {"torch_dtype": torch.float32}}
+
+
 def load_cached_sentence_transformer(model_id: str, cache_dir: Path, loader: Any):
     """Use the files already in cache_dir. Download only when they are absent."""
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _construct(*, local_files_only: bool) -> Any:
         folder = str(cache_dir)
-        cpu = {"cache_folder": folder, "device": "cpu"}
+        cpu = {"cache_folder": folder, "device": "cpu", **_cpu_model_kwargs()}
         attempts = [
             {**cpu, "local_files_only": local_files_only, "trust_remote_code": True},
             {**cpu, "local_files_only": local_files_only},
-            cpu,
+            {"cache_folder": folder, "device": "cpu"},
         ]
         last_type_error: TypeError | None = None
         for kwargs in attempts:
@@ -416,10 +471,12 @@ def build_embedder():
                 "Hugging Face embeddings need sentence-transformers. "
                 "Install it with `uv add sentence-transformers`."
             ) from exc
-        client = load_cached_sentence_transformer(
-            EMBEDDING_MODEL,
-            huggingface_model_cache_dir(),
-            SentenceTransformer,
+        client = CpuSentenceTransformer(
+            load_cached_sentence_transformer(
+                EMBEDDING_MODEL,
+                huggingface_model_cache_dir(),
+                SentenceTransformer,
+            )
         )
         return SentenceTransformerEmbedder(
             id=EMBEDDING_MODEL,
