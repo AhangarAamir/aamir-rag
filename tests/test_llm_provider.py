@@ -121,6 +121,74 @@ class LlmProviderTests(unittest.TestCase):
         self.assertNotIn("prompt_name", encoded)
         self.assertTrue(encoded["normalize_embeddings"])
 
+    def test_gte_position_ids_are_rebuilt_when_the_buffer_is_garbage(self) -> None:
+        class _Buffer:
+            def __init__(self, values: list[int], shape: tuple[int, ...]) -> None:
+                self.values = values
+                self.shape = shape
+                self.device = "cpu"
+
+            def numel(self) -> int:
+                return len(self.values)
+
+            def detach(self) -> "_Buffer":
+                return self
+
+            def reshape(self, _spec: int) -> "_Buffer":
+                return self
+
+            def tolist(self) -> list[int]:
+                return list(self.values)
+
+        class _Torch:
+            long = "long"
+
+            def arange(self, width: int, device: str | None = None, dtype: str | None = None) -> _Buffer:
+                del device, dtype
+                return _Buffer(list(range(width)), (width,))
+
+        class _Embeddings:
+            def __init__(self) -> None:
+                self.registered: dict[str, _Buffer] = {}
+
+            def register_buffer(self, name: str, tensor: _Buffer, persistent: bool = True) -> None:
+                del persistent
+                self.registered[name] = tensor
+
+        class _Model:
+            def __init__(self) -> None:
+                self.embeddings = _Embeddings()
+                self.buffer = _Buffer([11758064, -4], (1, 2))
+
+            def named_modules(self):
+                yield "", self
+                yield "embeddings", self.embeddings
+
+            def named_buffers(self):
+                yield "embeddings.position_ids", self.buffer
+
+            def to(self, device: str) -> None:
+                del device
+
+            def float(self) -> None:
+                return None
+
+            def eval(self) -> None:
+                return None
+
+            def encode(self, sentences, **kwargs):
+                del sentences, kwargs
+                return [0.0]
+
+        model = _Model()
+        config.repair_gte_position_ids(model, torch_module=_Torch())
+        repaired = model.embeddings.registered["position_ids"]
+        self.assertEqual(repaired.tolist(), [0, 1])
+
+        healthy = _Model()
+        healthy.buffer = _Buffer([0, 1], (1, 2))
+        self.assertEqual(config.repair_gte_position_ids(healthy, torch_module=_Torch()), 0)
+
     def test_ollama_embed_host_strips_v1(self) -> None:
         self.assertEqual(
             config.ollama_embed_host(

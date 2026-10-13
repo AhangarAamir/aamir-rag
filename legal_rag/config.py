@@ -130,12 +130,79 @@ def huggingface_model_cache_dir() -> Path:
     return DATA_DIR / "models"
 
 
+def _position_id_values(buffer: Any) -> list[int] | None:
+    try:
+        flat = buffer.detach().reshape(-1)
+        values = flat.tolist()
+    except Exception:
+        return None
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+        return None
+    return values
+
+
+def _position_ids_are_corrupt(buffer: Any) -> bool:
+    """GTE stores position_ids as a non-persistent buffer, so it is not in the checkpoint.
+
+    Transformers 5 leaves that buffer uninitialized. encode then does rope[position_ids]
+    and the garbage index is reported as out of bounds for the chunk length.
+    """
+    numel = getattr(buffer, "numel", None)
+    if not callable(numel) or numel() == 0:
+        return True
+    values = _position_id_values(buffer)
+    if values is None:
+        return True
+    width = len(values)
+    return any(value < 0 or value >= width for value in values)
+
+
+def repair_gte_position_ids(model: Any, torch_module: Any | None = None) -> int:
+    """Rewrite corrupt position_ids buffers. Returns how many were repaired."""
+    torch = torch_module
+    if torch is None:
+        try:
+            import torch as imported
+        except ImportError:
+            return 0
+        torch = imported
+    named_buffers = getattr(model, "named_buffers", None)
+    named_modules = getattr(model, "named_modules", None)
+    if not callable(named_buffers) or not callable(named_modules):
+        return 0
+    modules = dict(named_modules())
+    max_positions = 0
+    for module in modules.values():
+        config = getattr(module, "config", None)
+        width = getattr(config, "max_position_embeddings", None)
+        if isinstance(width, int) and width > max_positions:
+            max_positions = width
+    if max_positions <= 0:
+        max_positions = 8192
+    repaired = 0
+    for qualified, buffer in list(named_buffers()):
+        if not qualified.endswith("position_ids") or not _position_ids_are_corrupt(buffer):
+            continue
+        parent_name, _, attr = qualified.rpartition(".")
+        parent = modules.get(parent_name)
+        register = getattr(parent, "register_buffer", None)
+        if parent is None or not callable(register):
+            continue
+        width = buffer.numel() or max_positions
+        shape = tuple(buffer.shape) if buffer.numel() else (1, width)
+        device = getattr(buffer, "device", None)
+        fresh = torch.arange(width, device=device, dtype=torch.long).reshape(shape)
+        register(attr, fresh, persistent=False)
+        repaired += 1
+    return repaired
+
+
 class CpuSentenceTransformer:
     """Run a Hugging Face embedder on CPU in float32, without a prompt offset.
 
-    Alibaba GTE and similar models keep a prompt length and use it as an index
-    into the token sequence. On CPU that index is garbage, which shows up as
-    "index ... is out of bounds for dimension 0".
+    Alibaba GTE keeps position ids in a buffer that is not saved with the weights.
+    Transformers 5 does not restore it, so encode indexes the sequence with garbage
+    and raises "index ... is out of bounds for dimension 0".
     """
 
     def __init__(self, model: Any) -> None:
@@ -153,6 +220,7 @@ class CpuSentenceTransformer:
         prompts = getattr(model, "prompts", None)
         if isinstance(prompts, dict):
             model.prompts = {}
+        repair_gte_position_ids(model)
         self._model = model
 
     def encode(self, sentences: Any, prompt: str | None = None, normalize_embeddings: bool = False, **kwargs: Any):
