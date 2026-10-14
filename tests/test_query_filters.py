@@ -6,7 +6,9 @@ import unittest
 from types import SimpleNamespace
 
 from legal_rag.knowledge.chunking import build_chroma_filters, strip_workspace_path
-from legal_rag.agents.query import SharedCorpusKnowledgeTools, scratch_for_run
+from agno.knowledge.document import Document
+
+from legal_rag.agents.query import SharedCorpusKnowledgeTools, scratch_for_run, slim_hit
 
 
 class WorkspacePathTests(unittest.TestCase):
@@ -182,6 +184,24 @@ class SearchQueryTests(unittest.TestCase):
         self.assertIn("instrument_key", blob)
         self.assertIn("block", blob)
         self.assertIn("defined_terms", blob)
+
+
+class SlimHitTests(unittest.TestCase):
+    def test_truncates_chunk_text_and_drops_extra_metadata(self):
+        doc = Document(
+            content="A" * 2000,
+            name="KGD6.pdf",
+            meta_data={
+                "instrument_name": "KGD6 PSC",
+                "clause_id": "10.7",
+                "raw_dump": "B" * 5000,
+            },
+        )
+        hit = slim_hit(doc)
+        self.assertLess(len(hit["content"]), 1300)
+        self.assertTrue(hit["content"].endswith("…"))
+        self.assertEqual(hit["meta_data"]["clause_id"], "10.7")
+        self.assertNotIn("raw_dump", hit["meta_data"])
 
 
 if __name__ == "__main__":

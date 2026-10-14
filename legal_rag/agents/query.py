@@ -1,7 +1,7 @@
 """Query agent: answers from the knowledge base as a tool.
 
-Uses Agno KnowledgeTools (think → search_knowledge → analyze) as
-agentic RAG: the model decides when to retrieve. Does not ingest files.
+One search_knowledge call, then the answer. Think and analyze are not
+offered, because each extra tool round re-prefills the whole prompt.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from agno.utils.log import log_debug, log_error
 
 from legal_rag.config import NUM_HISTORY_RUNS, SEARCH_MAX_RESULTS, SESSIONS_DB_FILE, build_chat_model
 from legal_rag.knowledge.store import get_knowledge
-from legal_rag.learning.runtime import get_learning_machine
 from legal_rag.knowledge.chunking import (
     build_chroma_filters,
     document_matches_instrument,
@@ -27,13 +26,26 @@ from legal_rag.knowledge.chunking import (
     strip_workspace_path,
 )
 from legal_rag.observability.adapter import attach_observability
-from legal_rag.prompts import QUERY_FEW_SHOT, QUERY_INSTRUCTIONS, QUERY_TOOL_INSTRUCTIONS
+from legal_rag.prompts import QUERY_RUNTIME_INSTRUCTIONS
 from legal_rag.agents.topic_shift import isolate_unrelated_query, restore_query_history
 
-LEARNING_RECALL = (
-    "Before answering a factual question, call search_learnings and apply any "
-    "approved lesson that fits. Those lessons are shared across sessions and "
-    "users. Do not save a learning yourself; only a reviewer can approve one."
+_HIT_LIMIT = 5
+_HIT_CHARS = 1200
+_META_KEYS = (
+    "instrument_name",
+    "instrument_key",
+    "doc_family",
+    "clause_id",
+    "article",
+    "heading",
+    "parties",
+    "block",
+    "content_type",
+    "document_status",
+    "filename",
+    "source",
+    "page",
+    "defined_terms",
 )
 
 
@@ -122,28 +134,22 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
         cross_references: str = "",
         ocr_uncertainty: str = "",
     ) -> str:
-        """Search ingested instruments. Call only when the question needs evidence.
+        """Search the contract corpus once. Use filters from this message only.
 
         Args:
-            query: Search text for the CURRENT user message. Do not paste an
-                earlier turn's clause number into this string.
-            instrument_name: Named contract from this message, e.g. KGD6 PSC.
-                Matches instrument_name or derived instrument_key.
-            doc_family: Catalog family such as PSC, JOA, JAO, PML, RSC, PEL.
-            clause_id: Clause named in this message, e.g. 21.5. Never reuse
-                a previous turn's clause unless the user still means it.
+            query: Search text for the current user message.
+            instrument_name: Contract named in this message, e.g. KGD6 PSC.
+            doc_family: PSC, JOA, JAO, PML, RSC, or PEL.
+            clause_id: Clause named in this message, e.g. 21.5.
             article: Article named in this message, e.g. 21.
-            heading: Exact or stored heading, e.g. Assignment of Interest.
+            heading: Heading named in this message.
             parties: Party named in this message, e.g. RIL.
-            block: Block or contract area, e.g. KG-D6 or NEC-OSN-97-2.
-            content_type: clause, definition, table, toc, preamble,
-                schedule, annex, or other.
-            document_status: executed, draft, amendment, notification,
-                minutes, playbook, or unknown.
-            defined_terms: Defined term from this message, e.g. Petroleum.
-            cross_references: Referenced article/schedule named here.
-            ocr_uncertainty: "true" only when the user asks about OCR-uncertain
-                text. Leave empty otherwise.
+            block: Block named in this message, e.g. KG-D6.
+            content_type: clause, definition, table, schedule, annex, or other.
+            document_status: executed, draft, amendment, notification, or minutes.
+            defined_terms: Defined term named in this message.
+            cross_references: Referenced article or schedule named here.
+            ocr_uncertainty: true only if the user asks about uncertain OCR.
         """
         try:
             instrument_name = (instrument_name or "").strip()
@@ -214,7 +220,7 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
                         f"No hit matched instrument {instrument_name!r}; "
                         "returning ranked unfiltered hits"
                     )
-            payload = [doc.to_dict() for doc in ranked]
+            payload = [slim_hit(doc) for doc in ranked[:_HIT_LIMIT]]
             return strip_workspace_path(json.dumps(payload))
         except Exception as e:
             log_error(f"Error searching knowledge base: {str(e)}")
@@ -233,6 +239,27 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
         return document_matches_instrument(doc, instrument_name)
 
 
+def slim_hit(doc: Document) -> dict:
+    """Keep the next model prefill small. Full chunks are not sent back."""
+    raw = doc.to_dict()
+    content = str(raw.get("content") or "")
+    if len(content) > _HIT_CHARS:
+        content = content[:_HIT_CHARS].rstrip() + "…"
+    meta = raw.get("meta_data") if isinstance(raw.get("meta_data"), dict) else {}
+    slim_meta = {}
+    for key in _META_KEYS:
+        value = meta.get(key)
+        if value in (None, "", [], {}):
+            continue
+        text = value if isinstance(value, str) else str(value)
+        slim_meta[key] = text[:200]
+    hit = {"content": content, "meta_data": slim_meta}
+    name = raw.get("name")
+    if name:
+        hit["name"] = str(name)[:200]
+    return hit
+
+
 def build_query_agent() -> Agent:
     knowledge = get_knowledge()
     return attach_observability(Agent(
@@ -244,26 +271,24 @@ def build_query_agent() -> Agent:
             db_file=str(SESSIONS_DB_FILE),
             session_table="query_sessions",
         ),
-        enable_session_summaries=True,
-        add_session_summary_to_context=True,
+        enable_session_summaries=False,
+        add_session_summary_to_context=False,
         add_history_to_context=True,
         num_history_runs=NUM_HISTORY_RUNS,
         max_tool_calls_from_history=0,
         pre_hooks=[isolate_unrelated_query],
         post_hooks=[restore_query_history],
-        learning=get_learning_machine(),
         tools=[
             SharedCorpusKnowledgeTools(
                 knowledge=knowledge,
-                enable_think=True,
+                enable_think=False,
                 enable_search=True,
-                enable_analyze=True,
-                instructions=f"{QUERY_TOOL_INSTRUCTIONS}\n\n{QUERY_FEW_SHOT}",
-                add_instructions=True,
+                enable_analyze=False,
+                add_instructions=False,
             )
         ],
         search_knowledge=False,
         markdown=True,
-        instructions=f"{QUERY_INSTRUCTIONS}\n\n{LEARNING_RECALL}",
+        instructions=QUERY_RUNTIME_INSTRUCTIONS,
         tool_choice="auto"
     ))

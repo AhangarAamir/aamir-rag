@@ -170,9 +170,12 @@ def should_isolate_from_history(
         return False
     if looks_like_follow_up(current):
         return False
-    classify_fn = classify or classify_depends_on_prior
+    # A non-follow-up is standalone. Calling the chat model here blocks the
+    # SSE stream on RunStarted for the whole classifier prefill.
+    if classify is None:
+        return True
     try:
-        depends = classify_fn(current, prior)
+        depends = classify(current, prior)
     except Exception as exc:
         log_warning(f"Topic-shift classifier failed; treating as standalone: {exc}")
         depends = False

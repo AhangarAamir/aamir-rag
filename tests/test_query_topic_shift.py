@@ -101,6 +101,14 @@ class ShouldIsolateTests(unittest.TestCase):
             )
         )
 
+    def test_non_follow_up_isolates_without_calling_the_model(self):
+        self.assertTrue(
+            should_isolate_from_history(
+                "What is the participating interest of RIL?",
+                ["What does article 10.7 state in KGD6 PSC?"],
+            )
+        )
+
     def test_classifier_error_defaults_to_standalone(self):
         def boom(current, prior):
             raise RuntimeError("no model")
