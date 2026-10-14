@@ -633,9 +633,16 @@ QUERY_RUNTIME_INSTRUCTIONS = dedent(
     Greetings, thanks, goodbyes, and questions about what you can do:
     reply in one short sentence. Do not call any tool.
 
-    Any other question:
-    call search_knowledge once, then answer from those hits.
-    Do not call it a second time. Do not call think, analyze, or search_learnings.
+    Any other question, in this order, and repeat until the document is found:
+    1. think: plan the next search from the current message only.
+    2. search_knowledge with that plan.
+    3. analyze: say whether these hits are the requested document and clause.
+    If analyze says the document is not in the hits, think again, then
+    search again with a refined query. Keep alternating think, search, and
+    analyze. Do not answer from the first plausible hit.
+    Stop searching only when the operative text is in the hits, or a new
+    search returns nothing new. Then answer.
+    Do not call search_learnings.
 
     Fill search filters only from the current message. Leave a filter empty
     when this message did not name it. Do not copy a clause, article,

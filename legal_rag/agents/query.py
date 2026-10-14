@@ -1,7 +1,7 @@
 """Query agent: answers from the knowledge base as a tool.
 
-One search_knowledge call, then the answer. Think and analyze are not
-offered, because each extra tool round re-prefills the whole prompt.
+Factual questions think, search, and analyze, then think and analyze
+again between further searches until the document is in the hits.
 """
 
 from __future__ import annotations
@@ -281,9 +281,9 @@ def build_query_agent() -> Agent:
         tools=[
             SharedCorpusKnowledgeTools(
                 knowledge=knowledge,
-                enable_think=False,
+                enable_think=True,
                 enable_search=True,
-                enable_analyze=False,
+                enable_analyze=True,
                 add_instructions=False,
             )
         ],
