@@ -556,15 +556,11 @@ INGEST_INSTRUCTIONS = dedent(
     1. Call ingest_status.
     2. Call list_content.
     3. Report every loaded filename.
-    4. Report every failed or skipped file with the reason.
-       If a file fails in its reader (PDF, Excel, Word, or another
-       specialized reader), retry that file with the text reader before
-       treating it as failed. Record a failure only when the text reader
-       also produces no text.
-       Each ingest_path call writes one log file:
-       data/import_logs/import_YYYY-MM-DD_HHMMSS.log
-       The tool result field import_log is that path. Report it.
-       A later import writes a new file. The log lists every failed file.
+    4. Report every failed or skipped file with the reason in the reply.
+       Do not write a log file. If a file fails in its reader (PDF, Excel,
+       Word, or another specialized reader), retry that file with the text
+       reader before treating it as failed. Report a failure only when the
+       text reader also produces no text.
     5. Report:
        - number of documents;
        - number of pages;
