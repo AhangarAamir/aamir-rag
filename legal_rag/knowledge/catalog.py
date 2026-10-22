@@ -148,6 +148,27 @@ COLLECTIONS: Tuple[DocumentCollection, ...] = (
         ("polar_satelite",),
     ),
     DocumentCollection(
+        "MINUTES_RESOLUTIONS",
+        "Minutes & Resolutions (MCM, MCR, and OCR) for KGD6 and NEC25",
+        (
+            "minutes & resolutions",
+            "minutes and resolutions",
+            "minutes resolutions",
+        ),
+        (),
+    ),
+    DocumentCollection(
+        "MCR_MCM",
+        "Management Committee Meetings and Resolutions (KG-UDWHP)",
+        (
+            "mcr-mcm",
+            "mcm-mcr",
+            "mcr mcm",
+            "mcm mcr",
+        ),
+        (),
+    ),
+    DocumentCollection(
         "NEC25",
         "NEC-OSN-97-2 (NEC-25) block documents",
         ("nec25", "nec-25", "nec 25", "nec-osn-97-2", "nec osn 97 2", "nec-osn 97/2"),
@@ -198,6 +219,8 @@ _PRIMARY_CODES = {
     "MCM",
     "MCR",
     "OCR",
+    "MINUTES_RESOLUTIONS",
+    "MCR_MCM",
     "MOM",
     "QPR",
     "WPB",
@@ -244,12 +267,98 @@ def match_collection_text(text: str, *, primary_only: bool = False) -> Optional[
     return None
 
 
+@dataclass(frozen=True)
+class SitesPlacement:
+    """Block theme for a file under the Regulatory sites tree."""
+
+    code: str
+    block: str
+    category: str
+
+
+# Folder-name compact form -> (doc_family, block). Longer blocks are listed first.
+_SITES_BLOCK_FOLDERS: Tuple[Tuple[str, str, str], ...] = (
+    ("kgudwhp20181", "MCR_MCM", "KG-UDWHP-2018/1"),
+    ("kgudwhp20221", "MCR_MCM", "KG-UDWHP-2022/1"),
+    ("kgd6", "MINUTES_RESOLUTIONS", "KGD6"),
+    ("nec25", "MINUTES_RESOLUTIONS", "NEC25"),
+)
+
+
+def _path_segments(*parts: str) -> list[str]:
+    segments: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        segments.extend(
+            segment
+            for segment in re.split(r"[\\/]+", str(part))
+            if segment and segment not in {".", ".."}
+        )
+    return segments
+
+
+def _compact_segment(segment: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", segment.lower())
+
+
+def _sites_category(segments: list[str]) -> str:
+    """Category folder under MINUTESnRESOLUTIONS, or the MCR-MCM / MCM-MCR leaf."""
+    compacts = [_compact_segment(segment) for segment in segments]
+    for index, compact in enumerate(compacts):
+        if compact != "minutesnresolutions":
+            continue
+        if index + 1 >= len(segments):
+            return ""
+        nxt = segments[index + 1]
+        if _compact_segment(nxt) == "documentcenter":
+            return ""
+        return nxt
+    for segment in segments:
+        if _compact_segment(segment) in {"mcrmcm", "mcmmcr"}:
+            return segment
+    return ""
+
+
+def classify_sites_path(*parts: str) -> Optional[SitesPlacement]:
+    """Map a sites path to its theme. Category folders do not choose the theme.
+
+    KGD6 and NEC25 are Minutes & Resolutions. KGUDWHP-2018-1 and
+    KGUDWHP-2022-1 are MCR-MCM, including a leaf named MCM-MCR.
+    Returns None when the path is not under a ``sites`` segment or names
+    none of those blocks.
+    """
+    segments = _path_segments(*parts)
+    if not any(segment.lower() == "sites" for segment in segments):
+        return None
+    found: Optional[Tuple[str, str]] = None
+    for segment in segments:
+        compact = _compact_segment(segment)
+        for key, code, block in _SITES_BLOCK_FOLDERS:
+            if compact == key:
+                found = (code, block)
+                break
+        if found is not None and found[0] == "MCR_MCM":
+            break
+    if found is None:
+        return None
+    code, block = found
+    return SitesPlacement(code=code, block=block, category=_sites_category(segments))
+
+
 def identify_collection(*parts: str) -> Optional[DocumentCollection]:
     """Pick a collection from folder path, then filename.
 
     Call with folder first so ``JOA/New JOA/NEC-25....pdf`` stays JOA.
     Leaf folders win inside a path (``PSC/Domestic`` -> PSC).
+    A Regulatory sites path is classified from its block folder first, so
+    ``.../KGD6/.../OCR`` stays Minutes & Resolutions rather than OCR.
     """
+    placement = classify_sites_path(*parts)
+    if placement is not None:
+        hit = collection_by_code(placement.code)
+        if hit is not None:
+            return hit
 
     def _scan(primary_only: bool) -> Optional[DocumentCollection]:
         for part in parts:

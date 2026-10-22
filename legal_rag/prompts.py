@@ -414,6 +414,12 @@ LEGAL_CHUNKER_INSTRUCTIONS = dedent(
       (KGD6, KG-D6, KG D6).
     - doc_family must be one catalog code. Prefer folder_path
       (JOA/New JOA, JAO/NEW JAO, PSC/Domestic, PML) over guessing.
+      If folder_path starts with sites/, keep guessed_family.
+      KGD6 and NEC25 are MINUTES_RESOLUTIONS. KGUDWHP-2018-1 and
+      KGUDWHP-2022-1 are MCR_MCM. Do not replace that family with OCR,
+      AUDITED_ACCOUNTS, BUDGET, or NEC25 because a category folder or
+      the block folder uses those words. Put the block in block
+      (KGD6, NEC25, KG-UDWHP-2018/1, KG-UDWHP-2022/1).
 {family_prompt_block()}
     - clause_id is the dotted number only (10.7). article is 10.
     - parties, block, heading, document_status when visible.
@@ -445,29 +451,38 @@ INGEST_INSTRUCTIONS = dedent(
     1. If the user provides a file or folder path, ingest that path.
     2. If the user says "ingest incoming" or provides no path, ingest:
        "{INCOMING_DIR}"
-    3. Load every supported file, including catalog families
+    3. JOA, PEL, PML, PSC, and RSC are already loaded. Do not ingest those
+       families again unless the user explicitly asks. When the user asks
+       to import sites, ingest only the sites folder they give (the tree
+       whose path contains a sites segment, under Regulatory).
+    4. Load every supported file, including catalog families
        ({", ".join(family_codes())}) from folders such as:
        - JOA/New JOA, JOA/Old JOA;
        - JAO/NEW JAO, JAO/OLD JAO;
        - PSC/Domestic;
-       - PML, RSC, PEL, FDP, DGH, MCM, MOM, QPR.
-    4. Never discard a draft, minute, playbook or model form merely because
+       - PML, RSC, PEL, FDP, DGH, MCM, MOM, QPR;
+       - sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/...;
+       - sites/Regulatory/NEC25/MINUTESnRESOLUTIONS/...;
+       - sites/Regulatory/KGUDWHP/Document Center/KGUDWHP-2018-1/MCR-MCM;
+       - sites/Regulatory/KGUDWHP/Document Center/KGUDWHP-2022-1/MCR-MCM
+         or MCM-MCR.
+    5. Never discard a draft, minute, playbook or model form merely because
        it is not operative. Load it and store its status.
-    5. Prefer local files over URLs unless the user explicitly provides a URL.
-    6. Preserve original source files and parsed text.
-    7. Store page numbers and source character offsets for every chunk.
-    8. Run OCR normalization only for obvious layout/OCR errors. Preserve
+    6. Prefer local files over URLs unless the user explicitly provides a URL.
+    7. Preserve original source files and parsed text.
+    8. Store page numbers and source character offsets for every chunk.
+    9. Run OCR normalization only for obvious layout/OCR errors. Preserve
        source_text separately from normalized_text.
-    9. Segment documents using CHUNKING_INSTRUCTIONS.
-    10. Generate:
+    10. Segment documents using CHUNKING_INSTRUCTIONS.
+    11. Generate:
         - parent clause chunks;
         - child chunks for oversized clauses;
         - complete table chunks;
         - complete definition chunks;
         - navigation/table-of-contents chunks marked non-operative.
-    11. Store structured metadata for every chunk.
-    12. Generate embeddings from normalized_text plus the heading path.
-    13. Also index the following fields for keyword search:
+    12. Store structured metadata for every chunk.
+    13. Generate embeddings from normalized_text plus the heading path.
+    14. Also index the following fields for keyword search:
         - filename;
         - document title;
         - article;
@@ -484,7 +499,7 @@ INGEST_INSTRUCTIONS = dedent(
         - percentages;
         - amounts;
         - cross-references.
-    14. Create searchable aliases for:
+    15. Create searchable aliases for:
         - Article / ARTICLE;
         - clause / section / paragraph;
         - Appendix / Annex / Schedule;
@@ -493,12 +508,12 @@ INGEST_INSTRUCTIONS = dedent(
         - profit petroleum / profit oil;
         - Ministry of Petroleum and Natural Gas / MoPNG / MOPNG;
         - Directorate General of Hydrocarbons / DGH.
-    15. Do not merge different instruments merely because they share:
+    16. Do not merge different instruments merely because they share:
         - a party;
         - a block;
         - a topic;
         - a filename prefix.
-    16. Link related documents only through explicit metadata such as:
+    17. Link related documents only through explicit metadata such as:
         - same contract number;
         - same block;
         - same amendment reference;
@@ -542,6 +557,14 @@ INGEST_INSTRUCTIONS = dedent(
     2. Call list_content.
     3. Report every loaded filename.
     4. Report every failed or skipped file with the reason.
+       If a file fails in its reader (PDF, Excel, Word, or another
+       specialized reader), retry that file with the text reader before
+       treating it as failed. Record a failure only when the text reader
+       also produces no text.
+       Each ingest_path call writes one log file:
+       data/import_logs/import_YYYY-MM-DD_HHMMSS.log
+       The tool result field import_log is that path. Report it.
+       A later import writes a new file. The log lists every failed file.
     5. Report:
        - number of documents;
        - number of pages;
@@ -579,6 +602,14 @@ QUERY_ABBREVIATION_GLOSSARY = dedent(
     - PEL = Petroleum Exploration Licence (exploration rights; distinct from a PML)
     - ML = Mining Lease (Government/DGH shorthand for a mining-lease area)
     - PML = Petroleum Mining Lease (lease for petroleum production; D1-D3 has a PML)
+    - MINUTES_RESOLUTIONS = Minutes & Resolutions (MCM, MCR, and OCR) stored
+      under sites/Regulatory/KGD6 and sites/Regulatory/NEC25. Blocks:
+      KGD6 (KG-DWN-98/3) and NEC25 (NEC-OSN-97/2). A category folder under
+      MINUTESnRESOLUTIONS (OCR, AUDITEDACCOUNTS, WORKPROGRAMMEnBUDGET, and
+      the rest) is not a separate doc_family.
+    - MCR_MCM = Management Committee Meetings and Resolutions for
+      KG-UDWHP-2018/1 (folder KGUDWHP-2018-1) and KG-UDWHP-2022/1
+      (folder KGUDWHP-2022-1). The leaf folder may be named MCR-MCM or MCM-MCR.
     - FDP = Field Development Plan (after commerciality is established)
     - AP = Appraisal Programme (may appear written out rather than as "AP")
     - NoD / NOD = Notification of Discovery (contractor notice after a discovery)
@@ -1026,8 +1057,26 @@ QUERY_INSTRUCTIONS = dedent(
     List every source used in the response. Do not omit a cited file
     from this list. Do not list a file that was not used.
 
-    File locations: after the base URL, use the Document Center folder
-    tree, then the file. The folders immediately after the link are:
+    File locations: a clickable markdown link. Encode spaces as %20.
+    Do not use a local disk path. Do not flatten folders.
+
+    Sites files, when folder_path starts with sites/:
+    The link is https://enp1.ril.com/ plus folder_path plus "/" plus
+    the filename. Keep every folder from sites down to the file. Do not
+    insert Document Center unless that folder is already in the path.
+
+    [sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/OCR/Document Center/file.pdf](https://enp1.ril.com/sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/OCR/Document%20Center/file.pdf)
+
+    [sites/Regulatory/KGUDWHP/Document Center/KGUDWHP-2018-1/MCR-MCM/file.pdf](https://enp1.ril.com/sites/Regulatory/KGUDWHP/Document%20Center/KGUDWHP-2018-1/MCR-MCM/file.pdf)
+
+    [sites/Regulatory/NEC25/MINUTESnRESOLUTIONS/WORKPROGRAMMEnBUDGET/Document Center/file.pdf](https://enp1.ril.com/sites/Regulatory/NEC25/MINUTESnRESOLUTIONS/WORKPROGRAMMEnBUDGET/Document%20Center/file.pdf)
+
+    KGUDWHP-2022-1 uses the same shape. Its leaf folder may be MCR-MCM
+    or MCM-MCR. Use the folder that is on the hit.
+
+    JOA, JAO, PEL, PML, PSC, and RSC:
+    After the base URL, use the Document Center folder tree, then the
+    file. The folders immediately after the link are:
 
     - JOA
     - JAO
@@ -1036,8 +1085,7 @@ QUERY_INSTRUCTIONS = dedent(
     - PSC
     - RSC
 
-    Keep every nested folder under that main folder. Do not flatten.
-    Do not use a local disk path.
+    Keep every nested folder under that main folder.
 
     Base URL:
 
@@ -1129,7 +1177,9 @@ QUERY_INSTRUCTIONS = dedent(
     - no citation supports only a nearby or related proposition;
     - missing evidence is explicitly disclosed;
     - a References section is present with a clickable link for each
-      cited file using the full Document Center folder tree
+      cited file. Sites files (folder_path starts with sites/) use
+      https://enp1.ril.com/ plus the path from sites to the filename.
+      JOA, JAO, PEL, PML, PSC, and RSC use the Document Center tree
       (JOA/NEW JOA/file.pdf, PEL/file.pdf, PML/OLD PML/file.pdf);
     - no citation path or URL contains aamirWS or data/ril_data.
 
@@ -1196,7 +1246,9 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        - conflicts and dates have been evaluated;
        - any missing evidence is disclosed; and
        - the answer ends with a References section listing each cited
-         file as the Document Center path after
+         file. When folder_path starts with sites/, the link is
+         https://enp1.ril.com/ plus the path from sites through the
+         filename. JOA, JAO, PEL, PML, PSC, and RSC stay on
          https://enp1.ril.com/sites/Regulatory/Document%20Center/
          for example JOA/NEW JOA/file.pdf, PEL/file.pdf, or
          PML/OLD PML/file.pdf

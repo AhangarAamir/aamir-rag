@@ -20,6 +20,7 @@ from agno.agent import Agent
 from agno.knowledge.chunking.recursive import RecursiveChunking
 from agno.knowledge.chunking.strategy import ChunkingStrategy
 from agno.knowledge.document.base import Document
+from agno.knowledge.reader.excel_reader import ExcelReader
 from agno.knowledge.reader.markdown_reader import MarkdownReader
 from agno.knowledge.reader.pdf_reader import PDFReader
 from agno.knowledge.reader.text_reader import TextReader
@@ -28,6 +29,7 @@ from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
 from legal_rag.knowledge.catalog import (
+    classify_sites_path,
     collection_by_code,
     identify_collection,
     normalize_family_code,
@@ -130,6 +132,8 @@ class SourceOrigin:
     folder_path: str = ""
     guessed_family: str = ""
     collection_description: str = ""
+    block: str = ""
+    category: str = ""
 
 
 def normalize_clause(value: str) -> str:
@@ -191,7 +195,26 @@ def strip_workspace_path(text: str) -> str:
     return _WORKSPACE_PATH.sub("", text)
 
 
+def sites_relative_folder(path: Path) -> Optional[str]:
+    """Parent folders from the ``sites`` segment down.
+
+    Windows separators are accepted. Returns None when the path has no
+    ``sites`` folder, so JOA/PSC paths keep the Document Center rule.
+    """
+    parts = [part for part in str(path).replace("\\", "/").split("/") if part and part not in {".", ".."}]
+    if len(parts) < 2:
+        return None
+    folders = parts[:-1]
+    for index, part in enumerate(folders):
+        if part.lower() == "sites":
+            return "/".join(folders[index:])
+    return None
+
+
 def _relative_folder(path: Path) -> str:
+    anchored = sites_relative_folder(path)
+    if anchored is not None:
+        return anchored
     parent = path.resolve().parent
     for root in (INCOMING_DIR.resolve(), ROOT_DIR.resolve()):
         try:
@@ -208,14 +231,15 @@ def origin_from_source(
     name: Optional[str] = None,
 ) -> SourceOrigin:
     path: Optional[Path] = None
+    raw_path = ""
     if isinstance(source, Path):
-        path = source
+        raw_path = str(source)
     elif isinstance(source, str) and source.strip():
-        path = Path(source)
+        raw_path = source.strip()
     elif source is not None:
-        raw_name = getattr(source, "name", "") or ""
-        if raw_name:
-            path = Path(raw_name)
+        raw_path = getattr(source, "name", "") or ""
+    if raw_path:
+        path = Path(raw_path.replace("\\", "/"))
 
     filename = ""
     if path is not None:
@@ -224,18 +248,33 @@ def origin_from_source(
         filename = Path(name).name
 
     display = Path(name).stem if name else (path.stem if path is not None else filename)
-    if display.lower().endswith(".pdf"):
-        display = display[:-4]
+    for suffix in (".pdf", ".xlsx", ".xls", ".xlsm"):
+        if display.lower().endswith(suffix):
+            display = display[: -len(suffix)]
+            break
     folder_path = strip_workspace_path(_relative_folder(path)) if path is not None else ""
-    hit = identify_collection(folder_path, filename, display)
-    family = hit.code if hit else ""
+    placement = classify_sites_path(folder_path, filename, display)
+    if placement is not None:
+        hit = collection_by_code(placement.code)
+        family = placement.code
+        description = hit.description if hit else ""
+        block = placement.block
+        category = placement.category
+    else:
+        hit = identify_collection(folder_path, filename, display)
+        family = hit.code if hit else ""
+        description = hit.description if hit else ""
+        block = ""
+        category = ""
     return SourceOrigin(
         filename=filename or display,
         display_name=display or filename,
         source_path=str(path.resolve()) if path is not None and path.parts else "",
         folder_path=folder_path,
         guessed_family=family,
-        collection_description=hit.description if hit else "",
+        collection_description=description,
+        block=block,
+        category=category,
     )
 
 
@@ -251,6 +290,10 @@ def apply_origin(document: Document, origin: SourceOrigin) -> None:
         meta.setdefault("doc_family", origin.guessed_family)
     if origin.collection_description:
         meta.setdefault("collection_description", origin.collection_description)
+    if origin.block:
+        meta.setdefault("block", origin.block)
+    if origin.category:
+        meta.setdefault("sites_category", origin.category)
     if origin.display_name:
         document.name = origin.display_name
         meta.setdefault("document_title", origin.display_name)
@@ -279,6 +322,9 @@ def locator_prefix(meta: Dict[str, Any], name: str = "") -> str:
     folder = strip_workspace_path(str(meta.get("folder_path") or ""))
     if folder:
         lines.append(f"[Folder: {folder}]")
+    category = meta.get("sites_category")
+    if category:
+        lines.append(f"[Category: {category}]")
     location_bits = []
     if meta.get("article"):
         location_bits.append(f"Article {meta['article']}")
@@ -769,7 +815,7 @@ class LegalAgenticChunking(ChunkingStrategy):
             "clause_id": clause,
             "heading": decision.heading.strip(),
             "parties": _join(decision.parties),
-            "block": decision.block.strip(),
+            "block": decision.block.strip() or str(origin.get("block") or ""),
             "content_type": decision.content_type.strip() or "clause",
             "document_status": decision.document_status.strip(),
             "cross_references": _join(decision.cross_references),
@@ -959,7 +1005,7 @@ def _stamp_then_chunk(
     documents: List[Document],
     origin: SourceOrigin,
     chunk: bool,
-    reader: PDFReader | MarkdownReader | TextReader,
+    reader: PDFReader | MarkdownReader | TextReader | ExcelReader,
 ) -> List[Document]:
     for doc in documents:
         apply_origin(doc, origin)
@@ -976,7 +1022,7 @@ async def _stamp_then_achunk(
     documents: List[Document],
     origin: SourceOrigin,
     chunk: bool,
-    reader: PDFReader | MarkdownReader | TextReader,
+    reader: PDFReader | MarkdownReader | TextReader | ExcelReader,
 ) -> List[Document]:
     for doc in documents:
         apply_origin(doc, origin)
@@ -1070,6 +1116,34 @@ class PathAwareTextReader(TextReader):
         return _read_with_origin(self, file, name, documents, was_chunk)
 
     async def async_read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        origin = origin_from_source(file, name)
+        was_chunk = self.chunk
+        self.chunk = False
+        try:
+            documents = await super().async_read(file, name=name)
+        finally:
+            self.chunk = was_chunk
+        return await _stamp_then_achunk(documents, origin, was_chunk, self)
+
+
+class PathAwareExcelReader(ExcelReader):
+    """Stamp sites/family folder metadata onto spreadsheet rows."""
+
+    def read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        origin = origin_from_source(file, name)
+        was_chunk = self.chunk
+        self.chunk = False
+        try:
+            documents = super().read(file, name=name)
+        finally:
+            self.chunk = was_chunk
+        return _stamp_then_chunk(documents, origin, was_chunk, self)
+
+    async def async_read(
+        self,
+        file: Union[Path, IO[Any]],
+        name: Optional[str] = None,
+    ) -> List[Document]:
         origin = origin_from_source(file, name)
         was_chunk = self.chunk
         self.chunk = False

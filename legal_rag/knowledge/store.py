@@ -31,10 +31,12 @@ from legal_rag.config import (
 from legal_rag.knowledge.chunking import (
     LegalAgenticChunking,
     LocatorChunking,
+    PathAwareExcelReader,
     PathAwareMarkdownReader,
     PathAwarePDFReader,
     PathAwareTextReader,
 )
+from legal_rag.knowledge.reader_fallback import install_text_fallback
 
 LEARNINGS_COLLECTION = "legal_learnings"
 LEARNINGS_VECTOR_DB_DIR = DATA_DIR / "learnings_vectordb"
@@ -66,16 +68,22 @@ def _attach_readers(knowledge: Knowledge) -> None:
         name="Legal Text Reader",
         chunking_strategy=strategy,
     )
+    # Spreadsheets keep row chunks. Stamp the same folder/theme metadata as PDFs.
+    excel_reader = PathAwareExcelReader(name="Legal Excel Reader")
     if knowledge.readers is None:
         knowledge.readers = {}
     knowledge.readers["pdf"] = pdf_reader
     knowledge.readers["markdown"] = markdown_reader
     knowledge.readers["text"] = text_reader
+    knowledge.readers["excel"] = excel_reader
     # Path ingest uses ReaderFactory.get_reader_for_extension, which caches
     # a default PDFReader. Replace that cache so ingest_path uses this strategy.
     ReaderFactory._reader_cache["pdf"] = pdf_reader
     ReaderFactory._reader_cache["markdown"] = markdown_reader
     ReaderFactory._reader_cache["text"] = text_reader
+    ReaderFactory._reader_cache["excel"] = excel_reader
+    # Reader errors (and empty reads of a non-empty file) are retried as text.
+    install_text_fallback(text_reader)
 
 
 def get_knowledge() -> Knowledge:

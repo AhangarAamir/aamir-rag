@@ -4,9 +4,22 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from legal_rag.knowledge.chunking import build_chroma_filters, strip_workspace_path
+from agno.knowledge.document.base import Document
+from agno.knowledge.reader.excel_reader import ExcelReader
+
+from legal_rag.knowledge.catalog import identify_collection
+from legal_rag.knowledge.chunking import (
+    LegalAgenticChunking,
+    LegalChunkDecision,
+    PathAwareExcelReader,
+    build_chroma_filters,
+    origin_from_source,
+    strip_workspace_path,
+)
 from legal_rag.agents.query import SharedCorpusKnowledgeTools, scratch_for_run
+from legal_rag.prompts import QUERY_INSTRUCTIONS
 
 
 class WorkspacePathTests(unittest.TestCase):
@@ -27,6 +40,118 @@ class WorkspacePathTests(unittest.TestCase):
     def test_leaves_real_psc_folders(self):
         raw = "PSC/ril_data/Domestic/NELP 1/KGD6-PSC_2000.04.12.pdf"
         self.assertEqual(strip_workspace_path(raw), raw)
+
+    def test_sites_path_keeps_from_sites_and_minutes_theme(self):
+        raw = (
+            r"D:\aamirWS\data\ril_data\sites\Regulatory\KGD6"
+            r"\MINUTESnRESOLUTIONS\OCR\Document Center\minutes.pdf"
+        )
+        origin = origin_from_source(raw)
+        self.assertEqual(
+            origin.folder_path,
+            "sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/OCR/Document Center",
+        )
+        self.assertEqual(origin.filename, "minutes.pdf")
+        self.assertEqual(origin.guessed_family, "MINUTES_RESOLUTIONS")
+        self.assertEqual(origin.block, "KGD6")
+        self.assertEqual(origin.category, "OCR")
+        self.assertEqual(
+            identify_collection(origin.folder_path, origin.filename).code,
+            "MINUTES_RESOLUTIONS",
+        )
+
+    def test_audited_accounts_under_kgd6_stays_minutes(self):
+        raw = (
+            "sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/AUDITEDACCOUNTS/"
+            "Document Center/accounts.pdf"
+        )
+        origin = origin_from_source(raw)
+        self.assertEqual(origin.guessed_family, "MINUTES_RESOLUTIONS")
+        self.assertEqual(origin.category, "AUDITEDACCOUNTS")
+        self.assertNotEqual(origin.guessed_family, "AUDITED_ACCOUNTS")
+
+    def test_kgudwhp_2022_mcm_mcr_is_mcr_mcm(self):
+        raw = (
+            "sites/Regulatory/KGUDWHP/Document Center/KGUDWHP-2022-1/"
+            "MCM-MCR/status.xlsx"
+        )
+        origin = origin_from_source(raw)
+        self.assertEqual(
+            origin.folder_path,
+            "sites/Regulatory/KGUDWHP/Document Center/KGUDWHP-2022-1/MCM-MCR",
+        )
+        self.assertEqual(origin.guessed_family, "MCR_MCM")
+        self.assertEqual(origin.block, "KG-UDWHP-2022/1")
+        self.assertEqual(origin.category, "MCM-MCR")
+
+    def test_nec25_sites_is_minutes_not_nec25_family(self):
+        raw = (
+            "sites/Regulatory/NEC25/MINUTESnRESOLUTIONS/REVIEWOFDOC/"
+            "Document Center/review.pdf"
+        )
+        origin = origin_from_source(raw)
+        self.assertEqual(origin.guessed_family, "MINUTES_RESOLUTIONS")
+        self.assertEqual(origin.block, "NEC25")
+        self.assertEqual(origin.category, "REVIEWOFDOC")
+
+    def test_joa_path_is_not_a_sites_theme(self):
+        origin = origin_from_source(r"D:\aamirWS\data\ril_data\JOA\New JOA\file.pdf")
+        self.assertEqual(origin.guessed_family, "JOA")
+        self.assertFalse(origin.folder_path.lower().startswith("sites/"))
+        self.assertEqual(origin.block, "")
+
+    def test_empty_chunker_block_keeps_sites_block(self):
+        document = Document(
+            name="minutes",
+            content="text",
+            meta_data={
+                "block": "KGD6",
+                "doc_family": "MINUTES_RESOLUTIONS",
+                "folder_path": "sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/OCR",
+            },
+        )
+        decision = LegalChunkDecision(doc_family="OCR", block="")
+        meta = LegalAgenticChunking._chunk_metadata(
+            None,
+            document=document,
+            decision=decision,
+            chunk_number=1,
+            chunk_text="text",
+        )
+        self.assertEqual(meta["block"], "KGD6")
+        self.assertEqual(meta["doc_family"], "MINUTES_RESOLUTIONS")
+
+    def test_excel_reader_stamps_sites_path(self):
+        reader = PathAwareExcelReader(chunk=False)
+        source = (
+            r"D:\aamirWS\data\ril_data\sites\Regulatory\KGUDWHP\Document Center"
+            r"\KGUDWHP-2018-1\MCR-MCM\status.xlsx"
+        )
+        with patch.object(
+            ExcelReader,
+            "read",
+            return_value=[Document(content="a,b", name="status.xlsx")],
+        ):
+            docs = reader.read(source)
+        meta = docs[0].meta_data
+        self.assertEqual(
+            meta["folder_path"],
+            "sites/Regulatory/KGUDWHP/Document Center/KGUDWHP-2018-1/MCR-MCM",
+        )
+        self.assertEqual(meta["doc_family"], "MCR_MCM")
+        self.assertEqual(meta["block"], "KG-UDWHP-2018/1")
+        self.assertEqual(meta["sites_category"], "MCR-MCM")
+
+    def test_sites_citation_rule_is_in_the_query_prompt(self):
+        self.assertIn("folder_path starts with sites/", QUERY_INSTRUCTIONS)
+        self.assertIn(
+            "https://enp1.ril.com/sites/Regulatory/KGD6/MINUTESnRESOLUTIONS/OCR/Document%20Center/file.pdf",
+            QUERY_INSTRUCTIONS,
+        )
+        self.assertIn(
+            "https://enp1.ril.com/sites/Regulatory/Document%20Center/",
+            QUERY_INSTRUCTIONS,
+        )
 
 
 class BuildChromaFiltersTests(unittest.TestCase):
