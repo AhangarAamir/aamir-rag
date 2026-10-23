@@ -1,8 +1,8 @@
 """Ingest agent: loads files into the shared knowledge base.
 
 Uses Agno KnowledgeManagementTools (ingest_path / list_content / ingest_status).
-Does not answer legal questions. Each ingest_path writes one import log of
-failed files under data/import_logs/.
+Does not answer legal questions. Each finished document writes
+data/import_logs/<file name>.log.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from legal_rag.prompts import INGEST_INSTRUCTIONS
 
 
 class LoggingKnowledgeManagementTools(KnowledgeManagementTools):
-    """Same tools, plus one timestamped failure log per ingest_path."""
+    """Same tools. Each document log is written when that document finishes."""
 
     def ingest_path(self, run_context, path: str) -> str:  # type: ignore[override]
         started_at = datetime.now()

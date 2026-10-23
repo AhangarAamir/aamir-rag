@@ -29,6 +29,7 @@ from legal_rag.config import (
     VECTOR_DB_DIR,
     require_api_key,
 )
+from legal_rag.knowledge.import_log import install_per_file_import_logs
 from legal_rag.knowledge.text_encoding import build_encoding_csv_reader, build_encoding_json_reader
 from legal_rag.knowledge.chunking import (
     LegalAgenticChunking,
@@ -123,6 +124,7 @@ def get_knowledge() -> Knowledge:
         ),
     )
     _attach_readers(knowledge)
+    install_per_file_import_logs(knowledge)
     _knowledge = knowledge
     return knowledge
 

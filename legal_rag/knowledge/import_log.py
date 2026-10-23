@@ -1,8 +1,13 @@
-"""One timestamped log file for each ingest run."""
+"""One log file per imported document.
+
+The file is written when that document finishes. Its name is the document
+name plus ``.log``, for example ``budget.0.1.pdf.log``.
+"""
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
@@ -13,6 +18,7 @@ from agno.utils.log import log_warning
 from legal_rag.config import DATA_DIR
 
 IMPORT_LOG_DIR = DATA_DIR / "import_logs"
+_ILLEGAL_LOG_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def _status_text(status: Any) -> str:
@@ -99,6 +105,125 @@ def render_import_log(
     return "\n".join(lines)
 
 
+def document_log_name(file_name: str) -> str:
+    """``budget.0.1.pdf`` becomes ``budget.0.1.pdf.log``."""
+    raw = str(file_name or "").replace("\\", "/")
+    name = Path(raw).name.strip()
+    name = _ILLEGAL_LOG_CHARS.sub("_", name).rstrip(" .")
+    return f"{name or 'document'}.log"
+
+
+def write_document_log(
+    *,
+    file_name: str,
+    source_path: str,
+    status: str,
+    message: str = "",
+    finished_at: Optional[datetime] = None,
+    directory: Optional[Path] = None,
+) -> Path:
+    """Write ``<file name>.log``. A second import of the same name keeps both logs."""
+    root = directory or IMPORT_LOG_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    when = finished_at or datetime.now()
+    path = _unique_log_path(root, document_log_name(file_name), when)
+    lines = [
+        f"file: {source_path}",
+        f"finished_at: {when.isoformat(timespec='seconds')}",
+        f"status: {status}",
+    ]
+    if message:
+        lines.append(f"message: {message}")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _unique_log_path(root: Path, log_name: str, finished_at: datetime) -> Path:
+    path = root / log_name
+    if not path.exists():
+        return path
+    stamp = finished_at.strftime("%Y-%m-%d_%H%M%S")
+    stem = log_name[:-4] if log_name.lower().endswith(".log") else log_name
+    stamped = root / f"{stem}_{stamp}.log"
+    if not stamped.exists():
+        return stamped
+    suffix = 2
+    while True:
+        candidate = root / f"{stem}_{stamp}_{suffix}.log"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def _content_file(content: Any) -> Optional[Path]:
+    raw = getattr(content, "path", None)
+    if not raw:
+        return None
+    path = Path(str(raw))
+    if path.is_file():
+        return path
+    return None
+
+
+def _log_finished_document(
+    knowledge: Any,
+    content: Any,
+    path: Path,
+    error: Optional[BaseException],
+) -> None:
+    if error is not None:
+        status = "failed"
+        message = f"{type(error).__name__}: {error}"
+    else:
+        status = _status_text(getattr(content, "status", "")) or "completed"
+        message = str(getattr(content, "status_message", "") or "").strip()
+        if "fail" in status:
+            status = "failed"
+    write_document_log(
+        file_name=path.name,
+        source_path=str(path),
+        status=status,
+        message=message,
+        finished_at=datetime.now(),
+        directory=getattr(knowledge, "_import_log_dir", None),
+    )
+
+
+def install_per_file_import_logs(knowledge: Any) -> None:
+    """Write one log as soon as each file finishes inside path ingest."""
+    if getattr(knowledge, "_document_import_logs", False):
+        return
+    original_async = knowledge._aload_from_path
+    original_sync = knowledge._load_from_path
+
+    async def _aload_from_path(content, upsert, skip_if_exists, include=None, exclude=None):
+        path = _content_file(content)
+        try:
+            await original_async(content, upsert, skip_if_exists, include, exclude)
+        except Exception as exc:
+            if path is not None:
+                _log_finished_document(knowledge, content, path, exc)
+            raise
+        if path is not None:
+            _log_finished_document(knowledge, content, path, None)
+
+    def _load_from_path(content, upsert, skip_if_exists, include=None, exclude=None):
+        path = _content_file(content)
+        try:
+            original_sync(content, upsert, skip_if_exists, include, exclude)
+        except Exception as exc:
+            if path is not None:
+                _log_finished_document(knowledge, content, path, exc)
+            raise
+        if path is not None:
+            _log_finished_document(knowledge, content, path, None)
+
+    knowledge._aload_from_path = _aload_from_path
+    knowledge._load_from_path = _load_from_path
+    knowledge._document_import_logs = True
+
+
 def write_import_log(
     *,
     source_path: str,
@@ -143,7 +268,7 @@ def record_import(
     user_id: Optional[str] = None,
     directory: Optional[Path] = None,
 ) -> str:
-    """Write one import log for this run and add its path to the tool JSON."""
+    """Point the tool result at the per-document logs written during ingest."""
     try:
         finished_at = datetime.now()
         try:
@@ -153,43 +278,22 @@ def record_import(
         if not isinstance(payload, dict):
             payload = {"ok": False, "error": result}
 
-        failures: list[dict[str, str]] = []
-        site_id = payload.get("site_id")
-        if site_id:
-            failures = failed_files_from_folder(knowledge, str(site_id), user_id)
-        if not failures:
-            recorded = payload.get("failed") or []
-            if isinstance(recorded, list):
-                for entry in recorded:
-                    if isinstance(entry, dict):
-                        failures.append(
-                            {
-                                "path": str(entry.get("path") or entry.get("url") or source_path),
-                                "error": str(entry.get("error") or "failed"),
-                            }
-                        )
-        if not failures and payload.get("ok") is False:
+        root = directory or IMPORT_LOG_DIR
+        payload["import_log_dir"] = str(root)
+        # Per-file logs are written as each document finishes. This covers a
+        # path ingest that fails before any document row is created.
+        if payload.get("ok") is False and not payload.get("site_id"):
             error = str(payload.get("error") or payload.get("status_message") or "failed")
-            failures.append({"path": source_path, "error": error})
-
-        page_rows = payload.get("page_rows")
-        if isinstance(page_rows, int):
-            loaded = max(0, page_rows - len(failures))
-        elif payload.get("ok") is True and not failures:
-            loaded = 1
-        else:
-            loaded = 0
-        status = str(payload.get("status") or ("failed" if payload.get("ok") is False else "completed"))
-        log_path = write_import_log(
-            source_path=source_path,
-            started_at=started_at,
-            finished_at=finished_at,
-            status=status,
-            loaded=loaded,
-            failures=failures,
-            directory=directory,
-        )
-        return attach_log_path(json.dumps(payload), log_path)
+            log_path = write_document_log(
+                file_name=source_path,
+                source_path=source_path,
+                status="failed",
+                message=error,
+                finished_at=finished_at,
+                directory=root,
+            )
+            payload["import_log"] = str(log_path)
+        return json.dumps(payload)
     except Exception as exc:
         log_warning(f"Could not write import log for {source_path}: {exc}")
         return result

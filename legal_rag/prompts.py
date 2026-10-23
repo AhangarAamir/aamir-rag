@@ -560,9 +560,9 @@ INGEST_INSTRUCTIONS = dedent(
        A file that fails in its reader stays failed. Do not read it again
        with another reader. A UTF-8 error such as byte 0xe2 is retried on
        that same file as Windows-1252 and then Latin-1.
-       ingest_path writes one import log of the failed files and returns
-       import_log (data/import_logs/import_YYYY-MM-DD_HHMMSS.log). Include
-       that path in the reply.
+       Each document writes data/import_logs/<file name>.log when that
+       document finishes. Example: budget.0.1.pdf.log. The tool result
+       includes import_log_dir. Include that directory in the reply.
     5. Report:
        - number of documents;
        - number of pages;
