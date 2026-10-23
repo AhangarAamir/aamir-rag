@@ -20,6 +20,7 @@ from agno.vectordb.chroma import ChromaDb
 from agno.vectordb.search import SearchType
 
 from legal_rag.config import (
+    CHUNKER_CONCURRENCY,
     CHUNKING_MAX_SIZE,
     CHUNKING_STRATEGY,
     COLLECTION_NAME,
@@ -28,6 +29,7 @@ from legal_rag.config import (
     VECTOR_DB_DIR,
     require_api_key,
 )
+from legal_rag.knowledge.text_encoding import build_encoding_csv_reader, build_encoding_json_reader
 from legal_rag.knowledge.chunking import (
     LegalAgenticChunking,
     LocatorChunking,
@@ -36,13 +38,24 @@ from legal_rag.knowledge.chunking import (
     PathAwarePDFReader,
     PathAwareTextReader,
 )
-from legal_rag.knowledge.reader_fallback import install_text_fallback
-
 LEARNINGS_COLLECTION = "legal_learnings"
 LEARNINGS_VECTOR_DB_DIR = DATA_DIR / "learnings_vectordb"
 
 _knowledge: Knowledge | None = None
 _learnings: Knowledge | None = None
+
+
+def build_embedder() -> OpenAIEmbedder:
+    """Embed in batches of CHUNKER_CONCURRENCY instead of one call per chunk.
+
+    A single file with hundreds of chunks would otherwise open one socket per
+    chunk. Windows select() fails above 512 sockets and kills the server.
+    """
+    return OpenAIEmbedder(
+        id=EMBEDDING_MODEL,
+        enable_batch=True,
+        batch_size=CHUNKER_CONCURRENCY,
+    )
 
 
 def build_chunking_strategy() -> ChunkingStrategy:
@@ -70,20 +83,25 @@ def _attach_readers(knowledge: Knowledge) -> None:
     )
     # Spreadsheets keep row chunks. Stamp the same folder/theme metadata as PDFs.
     excel_reader = PathAwareExcelReader(name="Legal Excel Reader")
+    json_reader = build_encoding_json_reader()
+    csv_reader = build_encoding_csv_reader()
     if knowledge.readers is None:
         knowledge.readers = {}
     knowledge.readers["pdf"] = pdf_reader
     knowledge.readers["markdown"] = markdown_reader
     knowledge.readers["text"] = text_reader
     knowledge.readers["excel"] = excel_reader
+    knowledge.readers["json"] = json_reader
     # Path ingest uses ReaderFactory.get_reader_for_extension, which caches
     # a default PDFReader. Replace that cache so ingest_path uses this strategy.
     ReaderFactory._reader_cache["pdf"] = pdf_reader
     ReaderFactory._reader_cache["markdown"] = markdown_reader
     ReaderFactory._reader_cache["text"] = text_reader
     ReaderFactory._reader_cache["excel"] = excel_reader
-    # Reader errors (and empty reads of a non-empty file) are retried as text.
-    install_text_fallback(text_reader)
+    ReaderFactory._reader_cache["json"] = json_reader
+    if csv_reader is not None:
+        knowledge.readers["csv"] = csv_reader
+        ReaderFactory._reader_cache["csv"] = csv_reader
 
 
 def get_knowledge() -> Knowledge:
@@ -101,7 +119,7 @@ def get_knowledge() -> Knowledge:
             path=str(VECTOR_DB_DIR),
             persistent_client=True,
             search_type=SearchType.hybrid,
-            embedder=OpenAIEmbedder(id=EMBEDDING_MODEL),
+            embedder=build_embedder(),
         ),
     )
     _attach_readers(knowledge)
@@ -126,7 +144,7 @@ def get_learnings_knowledge() -> Knowledge:
             path=str(LEARNINGS_VECTOR_DB_DIR),
             persistent_client=True,
             search_type=SearchType.hybrid,
-            embedder=OpenAIEmbedder(id=EMBEDDING_MODEL),
+            embedder=build_embedder(),
         ),
     )
     return _learnings

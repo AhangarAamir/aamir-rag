@@ -1,10 +1,13 @@
 """Ingest agent: loads files into the shared knowledge base.
 
 Uses Agno KnowledgeManagementTools (ingest_path / list_content / ingest_status).
-Does not answer legal questions. Does not write import log files.
+Does not answer legal questions. Each ingest_path writes one import log of
+failed files under data/import_logs/.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
@@ -12,9 +15,37 @@ from agno.models.openai import OpenAIResponses
 from agno.tools.knowledge import KnowledgeManagementTools
 
 from legal_rag.config import OPENAI_MODEL, SESSIONS_DB_FILE
+from legal_rag.knowledge.import_log import record_import
 from legal_rag.knowledge.store import get_knowledge
 from legal_rag.observability.adapter import attach_observability
 from legal_rag.prompts import INGEST_INSTRUCTIONS
+
+
+class LoggingKnowledgeManagementTools(KnowledgeManagementTools):
+    """Same tools, plus one timestamped failure log per ingest_path."""
+
+    def ingest_path(self, run_context, path: str) -> str:  # type: ignore[override]
+        started_at = datetime.now()
+        result = super().ingest_path(run_context, path)
+        return self._attach_import_log(path, started_at, result, run_context)
+
+    async def aingest_path(self, run_context, path: str) -> str:  # type: ignore[override]
+        started_at = datetime.now()
+        result = await super().aingest_path(run_context, path)
+        return self._attach_import_log(path, started_at, result, run_context)
+
+    def _attach_import_log(self, path: str, started_at: datetime, result: str, run_context) -> str:
+        try:
+            user_id = self._owner_id(run_context)
+        except Exception:
+            user_id = None
+        return record_import(
+            self.knowledge,
+            source_path=path,
+            started_at=started_at,
+            result=result,
+            user_id=user_id,
+        )
 
 
 def build_ingest_agent() -> Agent:
@@ -29,7 +60,7 @@ def build_ingest_agent() -> Agent:
             session_table="ingest_sessions",
         ),
         tools=[
-            KnowledgeManagementTools(
+            LoggingKnowledgeManagementTools(
                 knowledge=knowledge,
                 ingest_path=True,
                 ingest_url=True,

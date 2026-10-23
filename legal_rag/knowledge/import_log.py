@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 from agno.knowledge.utils import get_agno_metadata
+from agno.utils.log import log_warning
 
 from legal_rag.config import DATA_DIR
 
@@ -131,6 +132,67 @@ def write_import_log(
         encoding="utf-8",
     )
     return path
+
+
+def record_import(
+    knowledge: Any,
+    *,
+    source_path: str,
+    started_at: datetime,
+    result: str,
+    user_id: Optional[str] = None,
+    directory: Optional[Path] = None,
+) -> str:
+    """Write one import log for this run and add its path to the tool JSON."""
+    try:
+        finished_at = datetime.now()
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            payload = {"ok": False, "error": result}
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "error": result}
+
+        failures: list[dict[str, str]] = []
+        site_id = payload.get("site_id")
+        if site_id:
+            failures = failed_files_from_folder(knowledge, str(site_id), user_id)
+        if not failures:
+            recorded = payload.get("failed") or []
+            if isinstance(recorded, list):
+                for entry in recorded:
+                    if isinstance(entry, dict):
+                        failures.append(
+                            {
+                                "path": str(entry.get("path") or entry.get("url") or source_path),
+                                "error": str(entry.get("error") or "failed"),
+                            }
+                        )
+        if not failures and payload.get("ok") is False:
+            error = str(payload.get("error") or payload.get("status_message") or "failed")
+            failures.append({"path": source_path, "error": error})
+
+        page_rows = payload.get("page_rows")
+        if isinstance(page_rows, int):
+            loaded = max(0, page_rows - len(failures))
+        elif payload.get("ok") is True and not failures:
+            loaded = 1
+        else:
+            loaded = 0
+        status = str(payload.get("status") or ("failed" if payload.get("ok") is False else "completed"))
+        log_path = write_import_log(
+            source_path=source_path,
+            started_at=started_at,
+            finished_at=finished_at,
+            status=status,
+            loaded=loaded,
+            failures=failures,
+            directory=directory,
+        )
+        return attach_log_path(json.dumps(payload), log_path)
+    except Exception as exc:
+        log_warning(f"Could not write import log for {source_path}: {exc}")
+        return result
 
 
 def attach_log_path(result: str, log_path: Path) -> str:

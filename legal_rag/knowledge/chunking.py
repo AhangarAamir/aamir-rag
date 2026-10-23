@@ -42,6 +42,7 @@ from legal_rag.config import (
     OPENAI_MODEL,
     ROOT_DIR,
 )
+from legal_rag.knowledge.text_encoding import open_decoded, tag_encoding
 from legal_rag.prompts import LEGAL_CHUNKER_INSTRUCTIONS
 
 GENERIC_QUERY_WORDS = frozenset(
@@ -488,13 +489,94 @@ class LocatorChunking(ChunkingStrategy):
         return chunks
 
 
+async def _label_one(
+    strategy: "LegalAgenticChunking",
+    *,
+    agent: Agent,
+    document: Document,
+    piece: Document,
+    index: int,
+    count: int,
+    identity: LegalChunkDecision,
+) -> LegalChunkDecision:
+    decision = await strategy._alabel(
+        agent=agent,
+        document=document,
+        window=piece.content or "",
+        remaining_len=len(piece.content or ""),
+        last=identity,
+        is_tail=index == count - 1,
+        role="label",
+        chunk_index=index + 1,
+        chunk_count=count,
+    )
+    if decision is None:
+        clause, article, heading = _heuristic_clause(piece.content or "")
+        return identity.model_copy(
+            update={
+                "split_at": len(piece.content or ""),
+                "clause_id": clause,
+                "article": article,
+                "heading": heading,
+            }
+        )
+    decision.instrument_name = decision.instrument_name or identity.instrument_name
+    decision.instrument_aliases = decision.instrument_aliases or list(identity.instrument_aliases)
+    decision.doc_family = decision.doc_family or identity.doc_family
+    decision.parties = decision.parties or list(identity.parties)
+    decision.block = decision.block or identity.block
+    decision.document_status = decision.document_status or identity.document_status
+    decision.running_summary = identity.running_summary
+    return decision
+
+
+async def _label_in_batches(
+    strategy: "LegalAgenticChunking",
+    *,
+    agent: Agent,
+    document: Document,
+    pieces: List[Document],
+    identity: LegalChunkDecision,
+) -> List[LegalChunkDecision]:
+    """Label at most CHUNKER_CONCURRENCY pieces at once, then the next batch."""
+    labeled: List[LegalChunkDecision] = []
+    count = len(pieces)
+    batch_size = CHUNKER_CONCURRENCY
+    total_batches = (count + batch_size - 1) // batch_size
+    for batch_number, offset in enumerate(range(0, count, batch_size), start=1):
+        batch = pieces[offset : offset + batch_size]
+        last = offset + len(batch)
+        log_info(
+            f"Legal async chunking batch {batch_number}/{total_batches}: "
+            f"chunks {offset + 1}-{last} of {count}"
+        )
+        labeled.extend(
+            await asyncio.gather(
+                *[
+                    _label_one(
+                        strategy,
+                        agent=agent,
+                        document=document,
+                        piece=piece,
+                        index=offset + index,
+                        count=count,
+                        identity=identity,
+                    )
+                    for index, piece in enumerate(batch)
+                ]
+            )
+        )
+    return labeled
+
+
 class LegalAgenticChunking(ChunkingStrategy):
     """Split locally, then label chunks with parallel async agent calls.
 
     Sequential window-by-window LLM splits are slow. Default path:
     1. Recursive split (no model).
     2. One identity call on the document head.
-    3. Concurrent ``agent.arun`` metadata labeling, capped by CHUNKER_CONCURRENCY.
+    3. Metadata labeling in batches of CHUNKER_CONCURRENCY (default 100).
+       The next batch starts only after the current batch finishes.
     """
 
     def __init__(self, max_chunk_size: int = CHUNKING_MAX_SIZE):
@@ -529,7 +611,7 @@ class LegalAgenticChunking(ChunkingStrategy):
         agent = get_chunker_agent()
         log_info(
             f"Legal async chunking: {name} ({len(text)} chars) -> "
-            f"{len(pieces)} split(s), concurrency={CHUNKER_CONCURRENCY}"
+            f"{len(pieces)} split(s), batch={CHUNKER_CONCURRENCY}"
         )
 
         identity = LegalChunkDecision(
@@ -554,46 +636,12 @@ class LegalAgenticChunking(ChunkingStrategy):
         if len(pieces) == 1:
             labeled = [identity]
         else:
-            semaphore = asyncio.Semaphore(CHUNKER_CONCURRENCY)
-
-            async def _one(index: int, piece: Document) -> LegalChunkDecision:
-                async with semaphore:
-                    decision = await self._alabel(
-                        agent=agent,
-                        document=document,
-                        window=piece.content or "",
-                        remaining_len=len(piece.content or ""),
-                        last=identity,
-                        is_tail=index == len(pieces) - 1,
-                        role="label",
-                        chunk_index=index + 1,
-                        chunk_count=len(pieces),
-                    )
-                    if decision is None:
-                        clause, article, heading = _heuristic_clause(piece.content or "")
-                        return identity.model_copy(
-                            update={
-                                "split_at": len(piece.content or ""),
-                                "clause_id": clause,
-                                "article": article,
-                                "heading": heading,
-                            }
-                        )
-                    decision.instrument_name = decision.instrument_name or identity.instrument_name
-                    decision.instrument_aliases = decision.instrument_aliases or list(
-                        identity.instrument_aliases
-                    )
-                    decision.doc_family = decision.doc_family or identity.doc_family
-                    decision.parties = decision.parties or list(identity.parties)
-                    decision.block = decision.block or identity.block
-                    decision.document_status = decision.document_status or identity.document_status
-                    decision.running_summary = identity.running_summary
-                    return decision
-
-            labeled = list(
-                await asyncio.gather(
-                    *[_one(index, piece) for index, piece in enumerate(pieces)]
-                )
+            labeled = await _label_in_batches(
+                self,
+                agent=agent,
+                document=document,
+                pieces=pieces,
+                identity=identity,
             )
 
         chunks: List[Document] = []
@@ -1086,43 +1134,51 @@ def _read_with_origin(
 
 class PathAwareMarkdownReader(MarkdownReader):
     def read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        stream, encoding = open_decoded(file, name)
         was_chunk = self.chunk
         self.chunk = False
         try:
-            documents = super().read(file, name=name)
+            documents = super().read(stream, name=name)
         finally:
             self.chunk = was_chunk
+        tag_encoding(documents, encoding)
         return _read_with_origin(self, file, name, documents, was_chunk)
 
     async def async_read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        stream, encoding = open_decoded(file, name)
         origin = origin_from_source(file, name)
         was_chunk = self.chunk
         self.chunk = False
         try:
-            documents = await super().async_read(file, name=name)
+            documents = await super().async_read(stream, name=name)
         finally:
             self.chunk = was_chunk
+        tag_encoding(documents, encoding)
         return await _stamp_then_achunk(documents, origin, was_chunk, self)
 
 
 class PathAwareTextReader(TextReader):
     def read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        stream, encoding = open_decoded(file, name)
         was_chunk = self.chunk
         self.chunk = False
         try:
-            documents = super().read(file, name=name)
+            documents = super().read(stream, name=name)
         finally:
             self.chunk = was_chunk
+        tag_encoding(documents, encoding)
         return _read_with_origin(self, file, name, documents, was_chunk)
 
     async def async_read(self, file: Union[Path, IO[Any]], name: Optional[str] = None) -> List[Document]:
+        stream, encoding = open_decoded(file, name)
         origin = origin_from_source(file, name)
         was_chunk = self.chunk
         self.chunk = False
         try:
-            documents = await super().async_read(file, name=name)
+            documents = await super().async_read(stream, name=name)
         finally:
             self.chunk = was_chunk
+        tag_encoding(documents, encoding)
         return await _stamp_then_achunk(documents, origin, was_chunk, self)
 
 

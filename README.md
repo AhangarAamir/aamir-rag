@@ -108,7 +108,7 @@ curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
 | `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
 | `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
 | `CHUNKER_ASYNC` | `true` (default): recursive split + parallel `agent.arun` labels |
-| `CHUNKER_CONCURRENCY` | parallel metadata calls per document (default `8`) |
+| `CHUNKER_CONCURRENCY` | chunk labels in flight per document; extra chunks wait for the next batch (default `100`) |
 | `SEARCH_MAX_RESULTS` | hits returned by `search_knowledge` (default `12`) |
 | `HOST` | bind address for AgentOS (default `127.0.0.1`; alias `AGENT_OS_HOST`) |
 | `PORT` | bind port for AgentOS (default `8000`; alias `AGENT_OS_PORT`) |

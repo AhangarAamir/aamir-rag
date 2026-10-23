@@ -28,7 +28,8 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
 CHUNKING_STRATEGY = os.getenv("CHUNKING_STRATEGY", "agentic").strip().lower()
 CHUNKING_MAX_SIZE = int(os.getenv("CHUNKING_MAX_SIZE", "4000"))
 CHUNKER_ASYNC = os.getenv("CHUNKER_ASYNC", "true").strip().lower() in {"1", "true", "yes", "on"}
-CHUNKER_CONCURRENCY = max(1, int(os.getenv("CHUNKER_CONCURRENCY", "8")))
+# Chunk labels run this many at a time. Further chunks wait for the next batch.
+CHUNKER_CONCURRENCY = max(1, int(os.getenv("CHUNKER_CONCURRENCY", "100")))
 SEARCH_MAX_RESULTS = int(os.getenv("SEARCH_MAX_RESULTS", "12"))
 QUERY_SESSION_ID = os.getenv("QUERY_SESSION_ID", "legal-query-default")
 NUM_HISTORY_RUNS = int(os.getenv("NUM_HISTORY_RUNS", "5"))

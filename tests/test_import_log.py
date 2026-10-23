@@ -7,7 +7,9 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from legal_rag.knowledge.import_log import failed_files_from_folder, write_import_log
+import json
+
+from legal_rag.knowledge.import_log import failed_files_from_folder, record_import, write_import_log
 
 
 class _Row:
@@ -89,3 +91,59 @@ class ImportLogTests(unittest.TestCase):
             failures,
             [{"path": "/bad.xlsx", "error": "ValueError: unreadable workbook"}],
         )
+
+    def test_record_import_writes_the_failed_file(self):
+        knowledge = _Knowledge(
+            {
+                "parent": _Row(
+                    "completed",
+                    "1 of 2 files loaded",
+                    {"_agno": {"children": ["bad"]}},
+                ),
+                "bad": _Row(
+                    "failed",
+                    "ValueError: pdf boom",
+                    {"_agno": {"source_path": r"D:\data\budget.pdf"}},
+                    "budget.pdf",
+                ),
+            }
+        )
+        when = datetime(2026, 10, 23, 10, 0, 0)
+        result = json.dumps(
+            {
+                "ok": True,
+                "site_id": "parent",
+                "status": "completed",
+                "page_rows": 2,
+                "failed": [{"path": "truncated", "error": "old"}],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            logged = record_import(
+                knowledge,
+                source_path=r"D:\data\sites",
+                started_at=when,
+                result=result,
+                directory=Path(tmp),
+            )
+            payload = json.loads(logged)
+            log_path = Path(payload["import_log"])
+            text = log_path.read_text(encoding="utf-8")
+        self.assertIn("budget.pdf", text)
+        self.assertIn("ValueError: pdf boom", text)
+        self.assertNotIn("truncated", text)
+        self.assertEqual(payload["site_id"], "parent")
+
+    def test_record_import_logs_a_failed_run_with_no_row(self):
+        when = datetime(2026, 10, 23, 10, 1, 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            logged = record_import(
+                _Knowledge({}),
+                source_path=r"D:\data\budget.pdf",
+                started_at=when,
+                result=json.dumps({"ok": False, "error": "PDF reader failed"}),
+                directory=Path(tmp),
+            )
+            text = Path(json.loads(logged)["import_log"]).read_text(encoding="utf-8")
+        self.assertIn("budget.pdf", text)
+        self.assertIn("PDF reader failed", text)
