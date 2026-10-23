@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -1083,6 +1084,76 @@ async def _stamp_then_achunk(
     return documents
 
 
+def _joined_text(documents: List[Document]) -> str:
+    return "\n".join(str(document.content or "") for document in documents).strip()
+
+
+def _pdf_path(pdf: Optional[Union[str, Path, IO[Any]]]) -> Optional[Path]:
+    if isinstance(pdf, Path):
+        return pdf
+    if isinstance(pdf, str) and pdf.strip():
+        return Path(pdf)
+    return None
+
+
+def _pdftotext(path: Path) -> str:
+    """Poppler text extract. Empty when the tool is missing or the PDF has no text layer."""
+    try:
+        completed = subprocess.run(
+            ["pdftotext", "-layout", "-enc", "UTF-8", str(path), "-"],
+            capture_output=True,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if completed.returncode != 0:
+        return ""
+    return completed.stdout.decode("utf-8", errors="replace")
+
+
+def _pypdf_layout_text(pdf: Optional[Union[str, Path, IO[Any]]], password: Optional[str]) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+    try:
+        reader = PdfReader(pdf, password=password) if password else PdfReader(pdf)
+        pages = [page.extract_text(extraction_mode="layout") or "" for page in reader.pages]
+    except Exception:
+        return ""
+    return "\n\n".join(pages)
+
+
+def recover_empty_pdf_text(
+    pdf: Optional[Union[str, Path, IO[Any]]],
+    name: Optional[str],
+    password: Optional[str],
+    documents: List[Document],
+) -> List[Document]:
+    """Replace an empty PDF extract with pdftotext, or fail the file.
+
+    An empty extract used to continue into "Async Upserting 0 documents", so the
+    file looked imported and nothing was searchable.
+    """
+    if _joined_text(documents):
+        return documents
+    label = name or (_pdf_path(pdf).name if _pdf_path(pdf) else "pdf")
+    log_warning(f"PDF reader extracted no text from {label}. Trying pdftotext.")
+    text = ""
+    source = "pdftotext"
+    path = _pdf_path(pdf)
+    if path is not None and path.is_file():
+        text = _pdftotext(path).strip()
+    if not text:
+        source = "PDF layout extract"
+        text = _pypdf_layout_text(pdf, password).strip()
+    if not text:
+        raise RuntimeError(f"PDF reader extracted no text from {label}. The file was not indexed.")
+    log_warning(f"Loaded {label} with {source} after the PDF reader extracted no text.")
+    return [Document(name=label, id=str(uuid.uuid4()), content=text)]
+
+
 class PathAwarePDFReader(PDFReader):
     """Stamp folder/filename onto the PDF before the custom chunker runs."""
 
@@ -1097,6 +1168,7 @@ class PathAwarePDFReader(PDFReader):
         self.chunk = False
         try:
             documents = super().read(pdf, name=name, password=password)
+            documents = recover_empty_pdf_text(pdf, name, password, documents)
         finally:
             self.chunk = was_chunk
         return _stamp_then_chunk(documents, origin, was_chunk, self)
@@ -1112,6 +1184,9 @@ class PathAwarePDFReader(PDFReader):
         self.chunk = False
         try:
             documents = await super().async_read(pdf, name=name, password=password)
+            documents = await asyncio.to_thread(
+                recover_empty_pdf_text, pdf, name, password, documents
+            )
         finally:
             self.chunk = was_chunk
         return await _stamp_then_achunk(documents, origin, was_chunk, self)
