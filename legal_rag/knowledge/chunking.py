@@ -41,6 +41,7 @@ from legal_rag.config import (
     CHUNKING_MAX_SIZE,
     INCOMING_DIR,
     OPENAI_MODEL,
+    RIL_DATA_DIR,
     ROOT_DIR,
 )
 from legal_rag.knowledge.text_encoding import open_decoded, tag_encoding
@@ -218,7 +219,7 @@ def _relative_folder(path: Path) -> str:
     if anchored is not None:
         return anchored
     parent = path.resolve().parent
-    for root in (INCOMING_DIR.resolve(), ROOT_DIR.resolve()):
+    for root in (INCOMING_DIR.resolve(), RIL_DATA_DIR.resolve(), ROOT_DIR.resolve()):
         try:
             relative = parent.relative_to(root)
             text = str(relative)

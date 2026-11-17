@@ -588,7 +588,7 @@ INGEST_INSTRUCTIONS = dedent(
 QUERY_ABBREVIATION_GLOSSARY = dedent(
     """
     Expand short forms and full forms in both directions when thinking
-    and when calling search_knowledge. Search both the abbreviation and
+    and when calling search_pdfs. Search both the abbreviation and
     the long name. Use these expansions for instrument_name and
     doc_family when the user (or a hit) uses either form. Do not invent
     other expansions.
@@ -667,8 +667,18 @@ QUERY_INSTRUCTIONS = dedent(
 
     Available tools:
     - think
-    - search_knowledge
+    - search_pdfs
+    - read_pdf
     - analyze
+    - search_knowledge
+
+    search_pdfs and read_pdf are the retrieval path. Each one runs a
+    shell command: the current Python interpreter, reading PDFs with
+    the PDF library already installed in this environment. The files
+    are under data/ril_data. The same command is used on Linux and
+    Windows. Do not call grep, find, pdftotext, or PowerShell.
+    search_knowledge stays available with the ingest knowledge base.
+    Answer contract questions from the PDF shell hits.
 
     Do not ingest files. Do not answer legal, fiscal, documentary or
     participating-interest questions from general knowledge.
@@ -697,14 +707,14 @@ QUERY_INSTRUCTIONS = dedent(
     - asks whether one clause affects another;
     - is any other factual contract question.
 
-    Set search_knowledge filters from the CURRENT user message only, using
-    the chunker-agent metadata fields: instrument_name, doc_family,
-    clause_id, article, heading, parties, block, content_type,
-    document_status, defined_terms, cross_references, ocr_uncertainty.
-    Never pass the previous turn's clause number, instrument, party,
-    block or heading unless the user still refers to it (for example
-    "that clause"). If they named a new subject, search that subject as
-    a new question.
+    Set search_pdfs from the CURRENT user message only. query holds the
+    clause, heading, party, block, or defined term. folder is the
+    family folder under data/ril_data when one is known, such as PSC,
+    JOA/New JOA, or sites/Regulatory/KGD6. filename is a part of the
+    PDF name when the user named a file. Never pass the previous turn's
+    clause number, instrument, party, block or heading unless the user
+    still refers to it (for example "that clause"). If they named a new
+    subject, search that subject as a new question.
 
     Retrieve for any question involving:
     - a contract clause or article;
@@ -744,17 +754,16 @@ QUERY_INSTRUCTIONS = dedent(
     - search related amendments, appendices, schedules, assignments,
       approvals and notifications belonging to that instrument or block;
     - include the instrument name or a confirmed alias in every search;
-    - pass search_knowledge filters from this message: instrument_name,
-      and clause_id or article when the user named a clause, doc_family
-      when obvious (PSC, JOA, JAO, PML, RSC, PEL, DGH, MCM, …), plus
-      heading, parties, block, content_type, document_status,
-      defined_terms or cross_references when the user named them;
-    - reject hits whose metadata instrument_name/filename/folder is a
-      different contract that merely shares a party, topic or type;
+    - pass that scope to search_pdfs: folder for the family directory
+      under data/ril_data, filename when a file is named, and the
+      clause, article, heading, party, block, or defined term inside
+      query;
+    - reject hits whose filename or folder_path is a different contract
+      that merely shares a party, topic or type;
     - never silently substitute another document.
 
     If no instrument is named:
-    - search the whole knowledge base;
+    - search every PDF under data/ril_data;
     - use topic synonyms, legal synonyms and likely document types.
 
     ============================================================
@@ -1181,8 +1190,8 @@ QUERY_INSTRUCTIONS = dedent(
       (JOA/NEW JOA/file.pdf, PEL/file.pdf, PML/OLD PML/file.pdf);
     - no citation path or URL contains aamirWS or data/ril_data.
 
-    If the completion check fails, search again or state that the knowledge
-    base did not provide sufficient evidence.
+    If the completion check fails, search the PDFs again or state that
+    data/ril_data did not provide sufficient evidence.
     """
 ).strip()
 
@@ -1195,26 +1204,29 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        use no tools and reply briefly.
 
     2. For every factual contract or document question:
-       call think, then search_knowledge at least twice, then analyze.
-       When the current message names an instrument or clause, set the
-       matching search_knowledge filters from THAT message:
-       instrument_name, clause_id, article, doc_family, heading, parties,
-       block, content_type, document_status, defined_terms,
-       cross_references, ocr_uncertainty. Expand glossary
+       call think, then search_pdfs at least twice, then analyze.
+       Call read_pdf when a snippet is too short to quote the operative
+       wording. search_pdfs and read_pdf shell out to the current Python
+       interpreter and read PDFs under data/ril_data with the installed
+       PDF library. Use that command on Linux and on Windows.
+       When the current message names an instrument, clause, or file,
+       set search_pdfs from THAT message: query for the clause, heading,
+       party, or defined term; folder for the directory under
+       data/ril_data; filename when a file is named. Expand glossary
        abbreviations (PSC, JOA, PML, KG-D6, RIL, PI, D1-D3, and the
        rest of the corpus list) to the full form and search both.
-       Do not copy clause_id,
-       article, instrument_name, or party from an earlier turn. Do not
-       rely on the query string alone. A follow-up that names a new
-       article, heading, party, or topic is a new search, even if the
-       session already discussed a related subject. If the current
-       message does not refer to the previous one, ignore the previous
-       one entirely.
+       Do not copy a clause, article, instrument, or party from an
+       earlier turn. A follow-up that names a new article, heading,
+       party, or topic is a new search, even if the session already
+       discussed a related subject. If the current message does not
+       refer to the previous one, ignore the previous one entirely.
+       search_knowledge remains registered. Retrieve the PDF text with
+       the shell tool.
 
     3. For named instruments, article lookup, PI, as-of-date, comparisons,
        conflicts, definition versions, multi-hop, playbook deviation or
        multi-term definitions:
-       call search_knowledge at least four times with distinct queries.
+       call search_pdfs at least four times with distinct queries.
 
     4. Do not answer after the first plausible hit.
 
@@ -1244,7 +1256,8 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        - conflicts and dates have been evaluated;
        - any missing evidence is disclosed; and
        - the answer ends with a References section listing each cited
-         file. When folder_path starts with sites/, the link is
+         file. Shell hits use the same folder_path and filename fields.
+         When folder_path starts with sites/, the link is
          https://enp1.ril.com/ plus the path from sites through the
          filename. JOA, JAO, PEL, PML, PSC, and RSC stay on
          https://enp1.ril.com/sites/Regulatory/Document%20Center/
@@ -1253,12 +1266,34 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
     """
 ).strip()
 
+PDF_SHELL_INSTRUCTIONS = dedent(
+    """
+    PDF shell tool:
+
+    - search_pdfs and read_pdf are the only shell commands.
+    - They run the current Python interpreter and read PDFs with the
+      PDF library in this environment. Do not build a different command
+      for Linux or Windows.
+    - Every PDF is under data/ril_data. folder and path are relative to
+      that directory. Use forward slashes.
+    - Hits already contain folder_path and filename. Build the existing
+      Document Center and sites links from those fields. Do not put
+      data/ril_data or a local disk path in a citation.
+    """
+).strip()
+
 QUERY_FEW_SHOT = dedent(
     """
+    Every Search line is a search_pdfs call. query is the search text.
+    folder is the directory under data/ril_data when the question names
+    a family. filename is set when the question names a file. Call
+    read_pdf for a short quote from a hit. Link creation is unchanged:
+    use folder_path and filename from the hit.
+
     Example 0 — greeting, no retrieval
     User: hello / hi / thanks
     Think: Social only. No corpus fact asked.
-    Tools: none. Do not search_knowledge.
+    Tools: none. Do not call search_pdfs or read_pdf.
     Final: Short greeting. Invite a contract question.
 
     Example A — heading + all locations
@@ -1321,13 +1356,12 @@ QUERY_FEW_SHOT = dedent(
     only (hyphens/spaces/typos/type expansion). Related = amendments
     of this X, not some other contract. Term typos: Discovery,
     Discovery Area, Reservoir; "statues" = states.
-    Search: query=X, filters instrument_name=X
-    Search: each defined term + X, filters instrument_name=X,
-            defined_terms=<term>, content_type=definition
-    Search: "Article 10.7" + X, filters instrument_name=X, clause_id=10.7,
-            doc_family=PSC
-    Search: amendment of X + 10.7, filters instrument_name=X,
-            document_status=amendment
+    Search: search_pdfs query=X, folder for that family, filename when
+            the file name is known
+    Search: search_pdfs query="<defined term> X", same folder and filename
+    Search: search_pdfs query="Article 10.7 X", folder=PSC when X is the
+            KGD6 PSC
+    Search: search_pdfs query="amendment Article 10.7 X", same folder
     Analyze: Keep hits whose filename/title/block is X or related to
     X. Discard another instrument's definitions/article. Quote from X.
     Final: Answer from X with filename + clause. If X is missing, say
@@ -1354,11 +1388,10 @@ QUERY_FEW_SHOT = dedent(
     Think: Current message names 21.5 / relinquishment, not 10.7. New search.
            Do not pass clause_id=10.7. Do not skip because Article 21 was
            mentioned in the 10.7 answer.
-    Search: query="relinquishment of right of development",
-            filters instrument_name=KGD6 PSC, clause_id=21.5, doc_family=PSC
-    Search: query="right of retention Development Area",
-            filters instrument_name=KGD6 PSC, article=21, doc_family=PSC,
-            heading=relinquishment
+    Search: search_pdfs query="relinquishment of right of development 21.5",
+            folder=PSC, filename=KGD6
+    Search: search_pdfs query="right of retention Development Area Article 21",
+            folder=PSC, filename=KGD6
     Analyze: Answer from 21.5 hits. Do not treat 10.7's 200-day Development
     Plan as the relinquishment rule.
     Final: Cite Article 21.5 and the KGD6 PSC filename.

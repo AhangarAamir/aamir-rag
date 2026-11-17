@@ -1,7 +1,9 @@
-"""Query agent: answers from the knowledge base as a tool.
+"""Query agent: answers from PDFs in data/ril_data.
 
-Uses Agno KnowledgeTools (think → search_knowledge → analyze) as
-agentic RAG: the model decides when to retrieve. Does not ingest files.
+Knowledge tools stay on the agent (think, search_knowledge, analyze).
+Factual reading uses the PDF shell command, which runs the current
+Python interpreter against data/ril_data on Linux and Windows.
+Does not ingest files.
 """
 
 from __future__ import annotations
@@ -28,8 +30,14 @@ from legal_rag.knowledge.chunking import (
     strip_workspace_path,
 )
 from legal_rag.observability.adapter import attach_observability
-from legal_rag.prompts import QUERY_FEW_SHOT, QUERY_INSTRUCTIONS, QUERY_TOOL_INSTRUCTIONS
+from legal_rag.prompts import (
+    PDF_SHELL_INSTRUCTIONS,
+    QUERY_FEW_SHOT,
+    QUERY_INSTRUCTIONS,
+    QUERY_TOOL_INSTRUCTIONS,
+)
 from legal_rag.agents.topic_shift import isolate_unrelated_query, restore_query_history
+from legal_rag.tools.pdf_shell import PdfCorpusShell
 
 LEARNING_RECALL = (
     "Before answering a factual question, call search_learnings and apply any "
@@ -261,7 +269,11 @@ def build_query_agent() -> Agent:
                 enable_analyze=True,
                 instructions=f"{QUERY_TOOL_INSTRUCTIONS}\n\n{QUERY_FEW_SHOT}",
                 add_instructions=True,
-            )
+            ),
+            PdfCorpusShell(
+                instructions=PDF_SHELL_INSTRUCTIONS,
+                add_instructions=True,
+            ),
         ],
         search_knowledge=False,
         markdown=True,

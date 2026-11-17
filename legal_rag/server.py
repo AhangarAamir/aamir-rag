@@ -82,7 +82,7 @@ knowledge = get_knowledge()
 agent_os = AgentOS(
     id="legal-rag-os",
     name="Legal RAG AgentOS",
-    description="Ingest agent writes contracts; query agent answers from knowledge tools.",
+    description="Ingest agent writes contracts; query agent reads data/ril_data PDFs with a shell tool.",
     agents=[ingest_agent, query_agent],
     knowledge=[knowledge],
     db=SqliteDb(id="agentos-db", db_file=str(DATA_DIR / "agentos.db")),

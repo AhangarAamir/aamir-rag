@@ -12,10 +12,12 @@ load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
 INCOMING_DIR = DATA_DIR / "incoming"
+RIL_DATA_DIR = DATA_DIR / "ril_data"
 VECTOR_DB_DIR = DATA_DIR / "vectordb"
 COLLECTION_NAME = "legal_contracts"
 
 INCOMING_DIR.mkdir(parents=True, exist_ok=True)
+RIL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 from legal_rag.knowledge.catalog import ensure_incoming_layout
