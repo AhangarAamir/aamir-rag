@@ -36,6 +36,7 @@ from legal_rag.prompts import (
     QUERY_INSTRUCTIONS,
     QUERY_TOOL_INSTRUCTIONS,
 )
+from legal_rag.agents.messages import latest_user_text
 from legal_rag.agents.topic_shift import isolate_unrelated_query, restore_query_history
 from legal_rag.tools.pdf_shell import PdfCorpusShell
 
@@ -63,7 +64,7 @@ def scratch_for_run(run_context: RunContext) -> dict:
 class SharedCorpusKnowledgeTools(KnowledgeTools):
     """Search the shared contract corpus, not a per-chat user slice."""
 
-    def think(self, run_context: RunContext, thought: str) -> str:
+    def think(self, run_context: RunContext, thought: str = "") -> str:
         """Use this tool as a scratchpad to reason about the question, refine your approach, brainstorm search terms, or revise your plan.
 
         Call `Think` whenever you need to figure out what to do next, analyze the user's question, or plan your approach.
@@ -76,6 +77,8 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
             str: The reasoning log for the current turn.
         """
         try:
+            if not (thought or "").strip():
+                thought = "Search the current question and keep only the matching PDF passage."
             log_debug(f"Thought: {thought}")
             session_state = scratch_for_run(run_context)
             session_state.setdefault("thoughts", []).append(thought)
@@ -89,7 +92,7 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
             log_error(f"Error recording thought: {str(e)}")
             return f"Error recording thought: {e}"
 
-    def analyze(self, run_context: RunContext, analysis: str) -> str:
+    def analyze(self, run_context: RunContext, analysis: str = "") -> str:
         """Use this tool to evaluate whether the returned documents are correct and sufficient.
 
         If not, go back to Think or Search with refined queries. Notes from earlier turns are not included.
@@ -101,6 +104,8 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
             str: The analysis log for the current turn.
         """
         try:
+            if not (analysis or "").strip():
+                return "No analysis was provided. Check the matching PDF passage before answering."
             log_debug(f"Analysis: {analysis}")
             session_state = scratch_for_run(run_context)
             session_state.setdefault("analysis", []).append(analysis)
@@ -117,7 +122,7 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
     def search_knowledge(
         self,
         run_context: RunContext,
-        query: str,
+        query: str = "",
         instrument_name: str = "",
         doc_family: str = "",
         clause_id: str = "",
@@ -174,6 +179,8 @@ class SharedCorpusKnowledgeTools(KnowledgeTools):
                     for part in (instrument_name, clause_id or article, heading, block)
                     if part
                 )
+            if not search_query:
+                search_query = latest_user_text(run_context)
             filters = build_chroma_filters(
                 doc_family=doc_family,
                 clause_id=clause_id,

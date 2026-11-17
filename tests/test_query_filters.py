@@ -308,6 +308,25 @@ class SearchQueryTests(unittest.TestCase):
         self.assertIn("block", blob)
         self.assertIn("defined_terms", blob)
 
+    def test_empty_think_and_search_do_not_raise(self):
+        knowledge = FakeKnowledge()
+        tools = SharedCorpusKnowledgeTools(
+            knowledge=knowledge,
+            enable_think=True,
+            enable_search=True,
+            enable_analyze=True,
+            add_instructions=False,
+        )
+        ctx = SimpleNamespace(
+            run_id="r1",
+            session_state={},
+            messages=[SimpleNamespace(role="user", content="What is the royalty?")],
+        )
+        self.assertIn("matching PDF", tools.think(ctx))
+        self.assertIn("No analysis", tools.analyze(ctx))
+        tools.search_knowledge(ctx)
+        self.assertEqual(knowledge.calls[0]["query"], "What is the royalty?")
+
 
 if __name__ == "__main__":
     unittest.main()

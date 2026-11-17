@@ -1206,7 +1206,9 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
     2. For every factual contract or document question:
        call think, then search_pdfs at least twice, then analyze.
        Call read_pdf when a snippet is too short to quote the operative
-       wording. search_pdfs and read_pdf shell out to the current Python
+       wording. Each call returns only the matching passage and then
+       stops. Do not ask for the rest of the file. search_pdfs and
+       read_pdf shell out to the current Python
        interpreter and read PDFs under data/ril_data with the installed
        PDF library. Use that command on Linux and on Windows.
        When the current message names an instrument, clause, or file,
@@ -1276,6 +1278,8 @@ PDF_SHELL_INSTRUCTIONS = dedent(
       for Linux or Windows.
     - Every PDF is under data/ril_data. folder and path are relative to
       that directory. Use forward slashes.
+    - A hit is the matching passage only. The rest of the PDF is not
+      returned. Do not ask the tool to read the whole file.
     - Hits already contain folder_path and filename. Build the existing
       Document Center and sites links from those fields. Do not put
       data/ril_data or a local disk path in a citation.

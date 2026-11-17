@@ -18,16 +18,17 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
+from agno.run import RunContext
 from agno.tools.shell import ShellTools
 
+from legal_rag.agents.messages import latest_user_text
 from legal_rag.config import RIL_DATA_DIR, ROOT_DIR, SEARCH_MAX_RESULTS
 from legal_rag.knowledge.catalog import identify_collection
 from legal_rag.knowledge.chunking import sites_relative_folder, strip_workspace_path
 
 PDF_MODULE = "legal_rag.tools.pdf_shell"
 CORPUS_LABEL = "data/ril_data"
-MAX_SNIPPET = 700
-MAX_READ_CHARS = 4000
+MAX_SNIPPET = 480
 MAX_READ_PAGES = 6
 MAX_FILES = 2000
 MAX_FILE_BYTES = 80 * 1024 * 1024
@@ -103,19 +104,35 @@ def citation_for(path: Path, corpus_root: Path) -> dict[str, str]:
     }
 
 
-def _snippet(text: str, terms: Iterable[str]) -> str:
-    compact = re.sub(r"\s+", " ", text).strip()
+def _page_matches(body: str, terms: list[str]) -> bool:
+    """True when this page holds the query, not merely the file name."""
+    present = [term for term in terms if term in body]
+    if not present:
+        return False
+    if len(terms) <= 3:
+        return len(present) == len(terms)
+    anchors = [term for term in terms if any(character.isdigit() for character in term)]
+    if not anchors:
+        anchors = [max(terms, key=len)]
+    return any(term in present for term in anchors) and len(present) >= 2
+
+
+def _excerpt(text: str, terms: Iterable[str]) -> str:
+    """The passage around the match. The rest of the page is discarded."""
+    compact = text.replace("\r", "")
     lowered = compact.casefold()
-    index = -1
-    for term in terms:
-        index = lowered.find(term)
-        if index >= 0:
-            break
-    if index < 0:
-        index = 0
-    start = max(0, index - 80)
-    end = min(len(compact), start + MAX_SNIPPET)
-    return compact[start:end]
+    indexes = [lowered.find(term) for term in terms]
+    indexes = [index for index in indexes if index >= 0]
+    if not indexes:
+        return ""
+    index = min(indexes)
+    line_start = compact.rfind("\n", 0, index)
+    start = line_start + 1 if line_start >= 0 and index - line_start <= 180 else max(0, index - 80)
+    paragraph_end = compact.find("\n\n", index)
+    end = paragraph_end if paragraph_end != -1 and paragraph_end <= index + MAX_SNIPPET else index + MAX_SNIPPET
+    end = min(len(compact), end)
+    excerpt = re.sub(r"[ \t]+", " ", compact[start:end]).strip()
+    return excerpt[:MAX_SNIPPET]
 
 
 def _page_text(page) -> str:
@@ -223,35 +240,35 @@ def search_corpus(
                 payload["errors"].append(f"{path.name}: {exc}")
             continue
         located = citation_for(path, corpus)
-        location = f"{located['folder_path']}\n{located['filename']}".casefold()
         for index, page in enumerate(reader.pages, start=1):
             text = _page_text(page)
-            body = text.casefold()
-            in_body = all(term in body for term in terms)
-            in_name = index == 1 and all(term in f"{location}\n{body}" for term in terms)
-            if not in_body and not in_name:
+            if not _page_matches(text.casefold(), terms):
                 continue
-            payload["hits"].append(
-                {
-                    **located,
-                    "page": index,
-                    "snippet": _snippet(text or located["filename"], terms),
-                }
-            )
-            if len(payload["hits"]) >= limit:
-                payload["truncated"] = True
-                break
+            excerpt = _excerpt(text, terms)
+            if not excerpt:
+                continue
+            payload["hits"].append({**located, "page": index, "snippet": excerpt})
+            break
     if not payload["hits"] and not payload["errors"]:
         payload["note"] = "No matching PDF text in data/ril_data."
     return payload
 
 
-def read_corpus(path: str, *, root: Path, pages: str = "") -> dict:
+def read_corpus(path: str, *, root: Path, pages: str = "", query: str = "") -> dict:
+    """Return the matching passage of one PDF and stop.
+
+    Pages before the match are checked only to find it. Later pages are
+    not extracted, and the rest of the matching page is not returned.
+    """
     corpus = root.resolve()
     target = resolve_under(corpus, path)
     payload: dict = {"root": CORPUS_LABEL, "path": (path or "").replace("\\", "/"), "pages": []}
+    terms = _terms(query)
     if target is None or not target.is_file() or target.suffix.lower() != ".pdf":
         payload["note"] = "path must be a PDF inside data/ril_data."
+        return payload
+    if not terms:
+        payload["note"] = "Pass query. Only the matching passage is read."
         return payload
     try:
         from pypdf import PdfReader
@@ -262,20 +279,25 @@ def read_corpus(path: str, *, root: Path, pages: str = "") -> dict:
         reader = PdfReader(str(target))
         if getattr(reader, "is_encrypted", False):
             raise OSError("PDF is encrypted")
-        selected = _parse_pages(pages, len(reader.pages))
+        selected = _parse_pages(pages, len(reader.pages)) if (pages or "").strip() else list(
+            range(1, len(reader.pages) + 1)
+        )
     except Exception as exc:
         payload["note"] = f"{target.name}: {exc}"
         return payload
     located = citation_for(target, corpus)
     payload.update(located)
-    truncated = False
     for number in selected:
-        text = re.sub(r"\s+", " ", _page_text(reader.pages[number - 1])).strip()
-        if len(text) > MAX_READ_CHARS:
-            text = text[:MAX_READ_CHARS]
-            truncated = True
-        payload["pages"].append({"page": number, "text": text})
-    payload["truncated"] = truncated
+        text = _page_text(reader.pages[number - 1])
+        if not _page_matches(text.casefold(), terms):
+            continue
+        excerpt = _excerpt(text, terms)
+        if not excerpt:
+            continue
+        payload["pages"].append({"page": number, "text": excerpt})
+        payload["note"] = "Matching passage only. The rest of the file was not returned."
+        return payload
+    payload["note"] = "No matching passage in that PDF."
     return payload
 
 
@@ -297,6 +319,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     read = subparsers.add_parser("read")
     read.add_argument("--path", required=True)
     read.add_argument("--pages", default="")
+    read.add_argument("--query", default="")
 
     args = parser.parse_args(argv)
     root = Path(args.root)
@@ -313,7 +336,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
         )
         return 0
-    print(_dump(read_corpus(args.path, root=root, pages=args.pages)))
+    print(_dump(read_corpus(args.path, root=root, pages=args.pages, query=args.query)))
     return 0
 
 
@@ -368,16 +391,22 @@ class PdfCorpusShell(ShellTools):
             return f"Error: {detail}"
         return (result.stdout or "").strip()
 
-    def search_pdfs(self, query: str, folder: str = "", filename: str = "") -> str:
+    def search_pdfs(
+        self,
+        run_context: RunContext,
+        query: str = "",
+        folder: str = "",
+        filename: str = "",
+    ) -> str:
         """Search PDF text in data/ril_data with a shell command.
 
-        The command runs the current Python interpreter and reads PDFs
-        with pypdf from this environment. Pass the same arguments on
-        Linux and Windows. Do not call grep, find, pdftotext, or PowerShell.
+        Returns only the matching passage of a file, then stops. The
+        rest of that file is not returned. The command is the current
+        Python interpreter and pypdf, on Linux and on Windows.
 
         Args:
             query: Words, clause, heading, or party from the current
-                user message.
+                user message. Empty uses that user message.
             folder: Folder under data/ril_data, with forward slashes.
                 Examples: PSC, JOA/New JOA, sites/Regulatory/KGD6.
                 Empty searches the whole ril_data tree.
@@ -385,33 +414,44 @@ class PdfCorpusShell(ShellTools):
                 Empty searches every PDF in folder.
 
         Returns:
-            JSON hits with filename, folder_path, page, snippet, and
-            doc_family. Cite folder_path and filename with the existing
+            JSON hits with filename, folder_path, page, and a short
+            snippet. Cite folder_path and filename with the existing
             link rules.
         """
-        args = self._command("search", f"--query={query or ''}")
+        question = (query or "").strip() or latest_user_text(run_context)
+        args = self._command("search", f"--query={question}")
         if folder:
             args.append(f"--folder={folder}")
         if filename:
             args.append(f"--filename={filename}")
         return self._run(args)
 
-    def read_pdf(self, path: str, pages: str = "") -> str:
-        """Read one PDF in data/ril_data with a shell command.
+    def read_pdf(
+        self,
+        run_context: RunContext,
+        path: str = "",
+        query: str = "",
+        pages: str = "",
+    ) -> str:
+        """Read the matching passage of one PDF under data/ril_data.
 
-        Uses the current Python interpreter and pypdf. The command is
-        the same on Linux and Windows.
+        Stops at the first matching passage. Does not return the rest
+        of the file. The command is the same on Linux and Windows.
 
         Args:
             path: PDF path relative to data/ril_data, forward slashes.
                 Example: JOA/New JOA/file.pdf
-            pages: 1-based pages, such as "4" or "4-6". Empty reads the
-                first pages.
+            query: Text to locate. Empty uses the current user message.
+            pages: Optional 1-based pages to search inside, such as "4"
+                or "4-6". Empty scans until the first match.
 
         Returns:
-            JSON with filename, folder_path, and page text.
+            JSON with filename, folder_path, and the matching passage.
         """
-        args = self._command("read", f"--path={path or ''}")
+        question = (query or "").strip() or latest_user_text(run_context)
+        if not (path or "").strip():
+            return self.search_pdfs(run_context, query=question)
+        args = self._command("read", f"--path={path}", f"--query={question}")
         if pages:
             args.append(f"--pages={pages}")
         return self._run(args)

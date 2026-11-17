@@ -23,16 +23,34 @@ from legal_rag.tools.pdf_shell import (
 
 
 def write_text_pdf(path: Path, text: str) -> None:
-    safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    stream = f"BT /F1 12 Tf 72 720 Td ({safe}) Tj ET\n".encode("latin-1", errors="replace")
-    parts = [
+    write_pages(path, [text])
+
+
+def write_pages(path: Path, pages: list[str]) -> None:
+    streams = []
+    for text in pages:
+        safe = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        streams.append(f"BT /F1 12 Tf 72 720 Td ({safe}) Tj ET\n".encode("latin-1", errors="replace"))
+    font_id = 3 + len(streams) * 2
+    parts: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Pages /Count "
+        + str(len(streams)).encode()
+        + b" /Kids ["
+        + b" ".join(f"{3 + index * 2} 0 R".encode() for index in range(len(streams)))
+        + b"] >>",
     ]
+    for index, stream in enumerate(streams):
+        contents_id = 4 + index * 2
+        parts.append(
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents "
+            + str(contents_id).encode()
+            + b" 0 R /Resources << /Font << /F1 "
+            + str(font_id).encode()
+            + b" 0 R >> >> >>"
+        )
+        parts.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream")
+    parts.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     header = b"%PDF-1.4\n"
     chunks = []
     offsets = [0]
@@ -108,24 +126,52 @@ class SearchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             pdf = root / "PSC" / "KGD6-PSC.pdf"
-            write_text_pdf(pdf, "Article 10.7 Discovery Area participating interest")
-            found = search_corpus(
-                "participating interest",
-                root=root,
-                folder=r"PSC",
-                filename="KGD6",
+            filler = (" Insurance notice boilerplate." * 40) + " UNIQUE_TAIL_MARKER"
+            write_pages(
+                pdf,
+                [
+                    "Article 10.7 Discovery Area participating interest." + filler,
+                    "PAGE TWO ONLY later article",
+                ],
             )
+            from legal_rag.tools import pdf_shell
+
+            calls = {"n": 0}
+            original = pdf_shell._page_text
+
+            def counting(page):
+                calls["n"] += 1
+                return original(page)
+
+            with patch("legal_rag.tools.pdf_shell._page_text", counting):
+                found = search_corpus(
+                    "participating interest",
+                    root=root,
+                    folder=r"PSC",
+                    filename="KGD6",
+                )
+            self.assertEqual(calls["n"], 1)
             self.assertEqual(len(found["hits"]), 1)
             hit = found["hits"][0]
             self.assertEqual(hit["filename"], "KGD6-PSC.pdf")
             self.assertEqual(hit["folder_path"], "PSC")
             self.assertEqual(hit["page"], 1)
             self.assertIn("participating interest", hit["snippet"])
+            self.assertNotIn("PAGE TWO ONLY", hit["snippet"])
+            self.assertNotIn("UNIQUE_TAIL_MARKER", hit["snippet"])
+            self.assertLess(len(hit["snippet"]), len(filler))
             self.assertNotIn(str(root), json.dumps(found))
 
-            opened = read_corpus(r"PSC\KGD6-PSC.pdf", root=root, pages="1")
+            opened = read_corpus(
+                r"PSC\KGD6-PSC.pdf",
+                root=root,
+                pages="1",
+                query="Article 10.7",
+            )
             self.assertEqual(opened["folder_path"], "PSC")
+            self.assertEqual(len(opened["pages"]), 1)
             self.assertIn("Article 10.7", opened["pages"][0]["text"])
+            self.assertNotIn("UNIQUE_TAIL_MARKER", opened["pages"][0]["text"])
 
     def test_escape_and_missing_folder_do_not_leave_the_corpus(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,11 +206,18 @@ class ShellCommandTests(unittest.TestCase):
             tool = PdfCorpusShell(corpus_dir=root, timeout=60)
             self.assertEqual(set(tool.functions), {"search_pdfs", "read_pdf"})
             self.assertNotIn("run_shell_command", tool.functions)
+
+            class _Message:
+                role = "user"
+                content = "royalty well-head"
+
+            context = type("Run", (), {"messages": [_Message()]})()
             with patch("legal_rag.tools.pdf_shell.subprocess.run", wraps=__import__("subprocess").run) as run:
-                raw = tool.search_pdfs("royalty", folder="PSC")
+                raw = tool.search_pdfs(context, query="", folder="PSC")
             argv = run.call_args.args[0]
             self.assertEqual(argv[0], sys.executable)
             self.assertEqual(argv[1:3], ["-m", "legal_rag.tools.pdf_shell"])
+            self.assertIn("--query=royalty well-head", argv)
             self.assertNotIn("pdftotext", argv)
             self.assertNotIn("grep", argv)
             self.assertFalse(run.call_args.kwargs.get("shell", False))
