@@ -16,6 +16,7 @@ from agno.utils.log import log_warning
 
 from legal_rag.config import DATA_DIR, OPENAI_MODEL, SESSIONS_DB_FILE
 from legal_rag.knowledge.catalog import QUERY_MIX_CODES, identify_collection
+from legal_rag.observability.console import install_tool_call_logging
 from legal_rag.observability.pricing import estimate_cost, model_rates, refresh_prices
 from legal_rag.observability.store import get_run, iso, list_run_ids, replace_spans, upsert_run
 
@@ -402,6 +403,7 @@ def import_session_runs(db_files: list[str | Path] | None = None) -> int:
 
 
 def attach_observability(agent: Agent) -> Agent:
+    install_tool_call_logging()
     refresh_prices()
     try:
         import_session_runs()
