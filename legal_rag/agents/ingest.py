@@ -11,10 +11,10 @@ from datetime import datetime
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
-from agno.models.openai import OpenAIResponses
+from legal_rag.models import build_model
 from agno.tools.knowledge import KnowledgeManagementTools
 
-from legal_rag.config import OPENAI_MODEL, SESSIONS_DB_FILE
+from legal_rag.config import SESSIONS_DB_FILE
 from legal_rag.knowledge.import_log import record_import
 from legal_rag.knowledge.store import get_knowledge
 from legal_rag.observability.adapter import attach_observability
@@ -53,7 +53,7 @@ def build_ingest_agent() -> Agent:
     return attach_observability(Agent(
         id="ingest-agent",
         name="Ingest Agent",
-        model=OpenAIResponses(id=OPENAI_MODEL),
+        model=build_model(),
         db=SqliteDb(
             id="ingest-sessions-db",
             db_file=str(SESSIONS_DB_FILE),

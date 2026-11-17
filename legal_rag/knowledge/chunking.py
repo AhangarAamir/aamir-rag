@@ -25,7 +25,7 @@ from agno.knowledge.reader.excel_reader import ExcelReader
 from agno.knowledge.reader.markdown_reader import MarkdownReader
 from agno.knowledge.reader.pdf_reader import PDFReader
 from agno.knowledge.reader.text_reader import TextReader
-from agno.models.openai import OpenAIResponses
+from legal_rag.models import build_model
 from agno.utils.log import log_info, log_warning
 from pydantic import BaseModel, Field
 
@@ -40,7 +40,6 @@ from legal_rag.config import (
     CHUNKER_CONCURRENCY,
     CHUNKING_MAX_SIZE,
     INCOMING_DIR,
-    OPENAI_MODEL,
     RIL_DATA_DIR,
     ROOT_DIR,
 )
@@ -463,7 +462,7 @@ def get_chunker_agent() -> Agent:
     _chunker_agent = Agent(
         id="legal-chunker",
         name="Legal Chunker",
-        model=OpenAIResponses(id=OPENAI_MODEL),
+        model=build_model(),
         output_schema=LegalChunkDecision,
         markdown=False,
         instructions=LEGAL_CHUNKER_INSTRUCTIONS,
