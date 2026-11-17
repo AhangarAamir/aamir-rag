@@ -203,7 +203,7 @@ def search_corpus(
         "errors": [],
     }
     if not terms:
-        payload["note"] = "Provide a query. Use read_pdf to open one file."
+        payload["note"] = "Provide a query. Use read_context to open one file."
         return payload
     if not corpus.is_dir():
         payload["note"] = f"No PDF folder at {CORPUS_LABEL}."
@@ -344,7 +344,7 @@ class PdfCorpusShell(ShellTools):
     """Shell tool that only reads PDFs under data/ril_data.
 
     run_shell_command stays on the class and is not offered to the model.
-    search_pdfs and read_pdf build one argv and execute it with
+    search_context and read_context build one argv and execute it with
     subprocess, which is the same on Linux and Windows.
     """
 
@@ -356,8 +356,8 @@ class PdfCorpusShell(ShellTools):
             timeout=timeout,
             **kwargs,
         )
-        self.register(self.search_pdfs)
-        self.register(self.read_pdf)
+        self.register(self.search_context)
+        self.register(self.read_context)
 
     def _command(self, *parts: str) -> list[str]:
         return [sys.executable, "-m", PDF_MODULE, "--root", str(self.corpus_dir), *parts]
@@ -391,14 +391,14 @@ class PdfCorpusShell(ShellTools):
             return f"Error: {detail}"
         return (result.stdout or "").strip()
 
-    def search_pdfs(
+    def search_context(
         self,
         run_context: RunContext,
         query: str = "",
         folder: str = "",
         filename: str = "",
     ) -> str:
-        """Search PDF text in data/ril_data with a shell command.
+        """Context search of PDF text in data/ril_data.
 
         Returns only the matching passage of a file, then stops. The
         rest of that file is not returned. The command is the current
@@ -426,14 +426,14 @@ class PdfCorpusShell(ShellTools):
             args.append(f"--filename={filename}")
         return self._run(args)
 
-    def read_pdf(
+    def read_context(
         self,
         run_context: RunContext,
         path: str = "",
         query: str = "",
         pages: str = "",
     ) -> str:
-        """Read the matching passage of one PDF under data/ril_data.
+        """Read the PDF context: the matching passage of one file under data/ril_data.
 
         Stops at the first matching passage. Does not return the rest
         of the file. The command is the same on Linux and Windows.
@@ -450,7 +450,7 @@ class PdfCorpusShell(ShellTools):
         """
         question = (query or "").strip() or latest_user_text(run_context)
         if not (path or "").strip():
-            return self.search_pdfs(run_context, query=question)
+            return self.search_context(run_context, query=question)
         args = self._command("read", f"--path={path}", f"--query={question}")
         if pages:
             args.append(f"--pages={pages}")

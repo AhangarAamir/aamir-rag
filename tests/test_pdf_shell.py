@@ -204,7 +204,7 @@ class ShellCommandTests(unittest.TestCase):
             root = Path(tmp)
             write_text_pdf(root / "PSC" / "file.pdf", "royalty well-head")
             tool = PdfCorpusShell(corpus_dir=root, timeout=60)
-            self.assertEqual(set(tool.functions), {"search_pdfs", "read_pdf"})
+            self.assertEqual(set(tool.functions), {"search_context", "read_context"})
             self.assertNotIn("run_shell_command", tool.functions)
 
             class _Message:
@@ -213,7 +213,7 @@ class ShellCommandTests(unittest.TestCase):
 
             context = type("Run", (), {"messages": [_Message()]})()
             with patch("legal_rag.tools.pdf_shell.subprocess.run", wraps=__import__("subprocess").run) as run:
-                raw = tool.search_pdfs(context, query="", folder="PSC")
+                raw = tool.search_context(context, query="", folder="PSC")
             argv = run.call_args.args[0]
             self.assertEqual(argv[0], sys.executable)
             self.assertEqual(argv[1:3], ["-m", "legal_rag.tools.pdf_shell"])

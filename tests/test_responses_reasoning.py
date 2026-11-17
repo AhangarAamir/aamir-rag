@@ -18,7 +18,7 @@ def _tool_message() -> Message:
                 "id": "fc_abc",
                 "call_id": "call_abc",
                 "type": "function",
-                "function": {"name": "search_pdfs", "arguments": "{}"},
+                "function": {"name": "search_context", "arguments": "{}"},
             }
         ],
         provider_data={

@@ -588,7 +588,7 @@ INGEST_INSTRUCTIONS = dedent(
 QUERY_ABBREVIATION_GLOSSARY = dedent(
     """
     Expand short forms and full forms in both directions when thinking
-    and when calling search_pdfs. Search both the abbreviation and
+    and when calling search_context. Search both the abbreviation and
     the long name. Use these expansions for instrument_name and
     doc_family when the user (or a hit) uses either form. Do not invent
     other expansions.
@@ -667,12 +667,12 @@ QUERY_INSTRUCTIONS = dedent(
 
     Available tools:
     - think
-    - search_pdfs
-    - read_pdf
+    - search_context
+    - read_context
     - analyze
     - search_knowledge
 
-    search_pdfs and read_pdf are the retrieval path. Each one runs a
+    search_context and read_context are the retrieval path. Each one runs a
     shell command: the current Python interpreter, reading PDFs with
     the PDF library already installed in this environment. The files
     are under data/ril_data. The same command is used on Linux and
@@ -707,7 +707,7 @@ QUERY_INSTRUCTIONS = dedent(
     - asks whether one clause affects another;
     - is any other factual contract question.
 
-    Set search_pdfs from the CURRENT user message only. query holds the
+    Set search_context from the CURRENT user message only. query holds the
     clause, heading, party, block, or defined term. folder is the
     family folder under data/ril_data when one is known, such as PSC,
     JOA/New JOA, or sites/Regulatory/KGD6. filename is a part of the
@@ -754,7 +754,7 @@ QUERY_INSTRUCTIONS = dedent(
     - search related amendments, appendices, schedules, assignments,
       approvals and notifications belonging to that instrument or block;
     - include the instrument name or a confirmed alias in every search;
-    - pass that scope to search_pdfs: folder for the family directory
+    - pass that scope to search_context: folder for the family directory
       under data/ril_data, filename when a file is named, and the
       clause, article, heading, party, block, or defined term inside
       query;
@@ -1204,15 +1204,15 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        use no tools and reply briefly.
 
     2. For every factual contract or document question:
-       call think, then search_pdfs at least twice, then analyze.
-       Call read_pdf when a snippet is too short to quote the operative
+       call think, then search_context at least twice, then analyze.
+       Call read_context when a snippet is too short to quote the operative
        wording. Each call returns only the matching passage and then
-       stops. Do not ask for the rest of the file. search_pdfs and
-       read_pdf shell out to the current Python
+       stops. Do not ask for the rest of the file. search_context and
+       read_context shell out to the current Python
        interpreter and read PDFs under data/ril_data with the installed
        PDF library. Use that command on Linux and on Windows.
        When the current message names an instrument, clause, or file,
-       set search_pdfs from THAT message: query for the clause, heading,
+       set search_context from THAT message: query for the clause, heading,
        party, or defined term; folder for the directory under
        data/ril_data; filename when a file is named. Expand glossary
        abbreviations (PSC, JOA, PML, KG-D6, RIL, PI, D1-D3, and the
@@ -1228,7 +1228,7 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
     3. For named instruments, article lookup, PI, as-of-date, comparisons,
        conflicts, definition versions, multi-hop, playbook deviation or
        multi-term definitions:
-       call search_pdfs at least four times with distinct queries.
+       call search_context at least four times with distinct queries.
 
     4. Do not answer after the first plausible hit.
 
@@ -1272,7 +1272,7 @@ PDF_SHELL_INSTRUCTIONS = dedent(
     """
     PDF shell tool:
 
-    - search_pdfs and read_pdf are the only shell commands.
+    - search_context and read_context are the only shell commands.
     - They run the current Python interpreter and read PDFs with the
       PDF library in this environment. Do not build a different command
       for Linux or Windows.
@@ -1288,16 +1288,16 @@ PDF_SHELL_INSTRUCTIONS = dedent(
 
 QUERY_FEW_SHOT = dedent(
     """
-    Every Search line is a search_pdfs call. query is the search text.
+    Every Search line is a search_context call. query is the search text.
     folder is the directory under data/ril_data when the question names
     a family. filename is set when the question names a file. Call
-    read_pdf for a short quote from a hit. Link creation is unchanged:
+    read_context for a short quote from a hit. Link creation is unchanged:
     use folder_path and filename from the hit.
 
     Example 0 — greeting, no retrieval
     User: hello / hi / thanks
     Think: Social only. No corpus fact asked.
-    Tools: none. Do not call search_pdfs or read_pdf.
+    Tools: none. Do not call search_context or read_context.
     Final: Short greeting. Invite a contract question.
 
     Example A — heading + all locations
@@ -1360,12 +1360,12 @@ QUERY_FEW_SHOT = dedent(
     only (hyphens/spaces/typos/type expansion). Related = amendments
     of this X, not some other contract. Term typos: Discovery,
     Discovery Area, Reservoir; "statues" = states.
-    Search: search_pdfs query=X, folder for that family, filename when
+    Search: search_context query=X, folder for that family, filename when
             the file name is known
-    Search: search_pdfs query="<defined term> X", same folder and filename
-    Search: search_pdfs query="Article 10.7 X", folder=PSC when X is the
+    Search: search_context query="<defined term> X", same folder and filename
+    Search: search_context query="Article 10.7 X", folder=PSC when X is the
             KGD6 PSC
-    Search: search_pdfs query="amendment Article 10.7 X", same folder
+    Search: search_context query="amendment Article 10.7 X", same folder
     Analyze: Keep hits whose filename/title/block is X or related to
     X. Discard another instrument's definitions/article. Quote from X.
     Final: Answer from X with filename + clause. If X is missing, say
@@ -1392,9 +1392,9 @@ QUERY_FEW_SHOT = dedent(
     Think: Current message names 21.5 / relinquishment, not 10.7. New search.
            Do not pass clause_id=10.7. Do not skip because Article 21 was
            mentioned in the 10.7 answer.
-    Search: search_pdfs query="relinquishment of right of development 21.5",
+    Search: search_context query="relinquishment of right of development 21.5",
             folder=PSC, filename=KGD6
-    Search: search_pdfs query="right of retention Development Area Article 21",
+    Search: search_context query="right of retention Development Area Article 21",
             folder=PSC, filename=KGD6
     Analyze: Answer from 21.5 hits. Do not treat 10.7's 200-day Development
     Plan as the relinquishment rule.
