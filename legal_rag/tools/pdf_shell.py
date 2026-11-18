@@ -10,11 +10,14 @@ command runs on Linux and Windows.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -24,7 +27,7 @@ from agno.tools.shell import ShellTools
 from legal_rag.agents.messages import latest_user_text
 from legal_rag.config import RIL_DATA_DIR, ROOT_DIR, SEARCH_MAX_RESULTS
 from legal_rag.knowledge.catalog import identify_collection
-from legal_rag.knowledge.chunking import sites_relative_folder, strip_workspace_path
+from legal_rag.knowledge.paths import sites_relative_folder, strip_workspace_path
 
 PDF_MODULE = "legal_rag.tools.pdf_shell"
 CORPUS_LABEL = "data/ril_data"
@@ -135,18 +138,163 @@ def _excerpt(text: str, terms: Iterable[str]) -> str:
     return excerpt[:MAX_SNIPPET]
 
 
+def _console(message: str) -> None:
+    """Timing line for the process console. stdout stays JSON for the CLI."""
+    print(message, file=sys.stderr)
+
+
 def _page_text(page) -> str:
+    """Extract upright text. Rotated text is read only when that is empty."""
     try:
-        return page.extract_text() or ""
+        text = page.extract_text(orientations=(0,)) or ""
     except Exception:
         return ""
+    if text.strip():
+        return text
+    try:
+        rotated = page.extract_text(orientations=(90, 270)) or ""
+    except Exception:
+        return text
+    return rotated or text
+
+
+_CACHE_LOCK = threading.Lock()
+_PAGE_MEMORY: dict[str, dict] = {}
+
+
+def _cache_file(corpus: Path, pdf: Path) -> Path:
+    digest = hashlib.sha1(str(pdf.resolve()).encode()).hexdigest()
+    return corpus / ".pdf_text_cache" / digest[:2] / f"{digest}.json"
+
+
+def _file_stamp(pdf: Path) -> tuple[int, int]:
+    stat = pdf.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
+def _remember(pdf: Path, pages: list[str], complete: bool) -> None:
+    size, mtime_ns = _file_stamp(pdf)
+    _PAGE_MEMORY[str(pdf.resolve())] = {
+        "size": size,
+        "mtime_ns": mtime_ns,
+        "complete": complete,
+        "pages": pages,
+    }
+
+
+def _cached_pages(corpus: Path, pdf: Path) -> tuple[list[str], bool]:
+    """Pages already extracted for this file. complete means every page is stored."""
+    size, mtime_ns = _file_stamp(pdf)
+    key = str(pdf.resolve())
+    with _CACHE_LOCK:
+        record = _PAGE_MEMORY.get(key)
+        if record and record.get("size") == size and record.get("mtime_ns") == mtime_ns:
+            return list(record.get("pages") or []), bool(record.get("complete"))
+    path = _cache_file(corpus, pdf)
+    if not path.is_file():
+        return [], False
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], False
+    if record.get("size") != size or record.get("mtime_ns") != mtime_ns:
+        return [], False
+    pages = [text if isinstance(text, str) else "" for text in record.get("pages") or []]
+    complete = bool(record.get("complete"))
+    with _CACHE_LOCK:
+        _PAGE_MEMORY[key] = {
+            "size": size,
+            "mtime_ns": mtime_ns,
+            "complete": complete,
+            "pages": list(pages),
+        }
+    return pages, complete
+
+
+def _store_pages(corpus: Path, pdf: Path, pages: list[str], complete: bool) -> None:
+    _remember(pdf, pages, complete)
+    path = _cache_file(corpus, pdf)
+    payload = {
+        "size": _file_stamp(pdf)[0],
+        "mtime_ns": _file_stamp(pdf)[1],
+        "complete": complete,
+        "pages": pages,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(path)
+    except OSError:
+        return
+
+
+def _open_reader(path: Path):
+    if path.stat().st_size > MAX_FILE_BYTES:
+        raise OSError("file is larger than the read limit")
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    if getattr(reader, "is_encrypted", False):
+        raise OSError("PDF is encrypted")
+    return reader
+
+
+def _excerpt_if_match(text: str, terms: list[str]) -> str:
+    if not text or not _page_matches(text.casefold(), terms):
+        return ""
+    return _excerpt(text, terms)
+
+
+def _first_passage(corpus: Path, pdf: Path, terms: list[str]) -> tuple[Optional[tuple[int, str]], bool]:
+    """Return the first matching passage and whether the PDF had to be opened.
+
+    Pages already extracted are reused. Later pages stay unread.
+    """
+    pages, complete = _cached_pages(corpus, pdf)
+    for index, text in enumerate(pages, start=1):
+        excerpt = _excerpt_if_match(text, terms)
+        if excerpt:
+            return (index, excerpt), False
+    if complete:
+        return None, False
+    reader = _open_reader(pdf)
+    total = len(reader.pages)
+    for index in range(len(pages) + 1, total + 1):
+        text = _page_text(reader.pages[index - 1])
+        pages.append(text)
+        excerpt = _excerpt_if_match(text, terms)
+        if excerpt:
+            _store_pages(corpus, pdf, pages, complete=index == total)
+            return (index, excerpt), True
+    _store_pages(corpus, pdf, pages, complete=True)
+    return None, True
+
+
+def _text_on_page(corpus: Path, pdf: Path, number: int) -> tuple[str, bool]:
+    """One stored page. Opens the PDF only when that page is not stored yet."""
+    pages, complete = _cached_pages(corpus, pdf)
+    if 1 <= number <= len(pages):
+        return pages[number - 1], False
+    if complete or number < 1:
+        return "", False
+    reader = _open_reader(pdf)
+    total = len(reader.pages)
+    while len(pages) < number and len(pages) < total:
+        pages.append(_page_text(reader.pages[len(pages)]))
+    _store_pages(corpus, pdf, pages, complete=len(pages) >= total)
+    if number <= len(pages):
+        return pages[number - 1], True
+    return "", True
 
 
 def _iter_pdfs(base: Path, filename: str) -> list[Path]:
     needle = (filename or "").casefold()
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
-        dirnames[:] = [name for name in dirnames if name not in {".git", "__pycache__"}]
+        dirnames[:] = [
+            name for name in dirnames if name not in {".git", "__pycache__", ".pdf_text_cache"}
+        ]
         for name in filenames:
             if not name.lower().endswith(".pdf"):
                 continue
@@ -156,6 +304,17 @@ def _iter_pdfs(base: Path, filename: str) -> list[Path]:
             if len(found) >= MAX_FILES:
                 return sorted(found)
     return sorted(found)
+
+
+def _rank_pdfs(files: list[Path], terms: list[str]) -> list[Path]:
+    """Files whose names contain the query are opened before the rest."""
+
+    def rank(path: Path) -> tuple[int, str]:
+        name = path.name.casefold()
+        overlap = sum(1 for term in terms if len(term) >= 3 and term in name)
+        return (-overlap, name)
+
+    return sorted(files, key=rank)
 
 
 def _parse_pages(spec: str, page_count: int) -> list[int]:
@@ -216,41 +375,38 @@ def search_corpus(
         payload["note"] = "That folder is not under data/ril_data."
         return payload
 
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        payload["note"] = "pypdf is not installed in this Python environment."
-        return payload
-
     limit = max(1, min(int(max_hits), 30))
-    files = _iter_pdfs(base, filename)
+    files = _rank_pdfs(_iter_pdfs(base, filename), terms)
+    opened = 0
+    started = time.perf_counter()
     for path in files:
         if len(payload["hits"]) >= limit:
             payload["truncated"] = True
             break
         payload["files_scanned"] += 1
         try:
-            if path.stat().st_size > MAX_FILE_BYTES:
-                raise OSError("file is larger than the read limit")
-            reader = PdfReader(str(path))
-            if getattr(reader, "is_encrypted", False):
-                raise OSError("PDF is encrypted")
+            found, did_open = _first_passage(corpus, path, terms)
+        except ImportError:
+            payload["note"] = "pypdf is not installed in this Python environment."
+            return payload
         except Exception as exc:
             if len(payload["errors"]) < 5:
                 payload["errors"].append(f"{path.name}: {exc}")
             continue
-        located = citation_for(path, corpus)
-        for index, page in enumerate(reader.pages, start=1):
-            text = _page_text(page)
-            if not _page_matches(text.casefold(), terms):
-                continue
-            excerpt = _excerpt(text, terms)
-            if not excerpt:
-                continue
-            payload["hits"].append({**located, "page": index, "snippet": excerpt})
-            break
+        if did_open:
+            opened += 1
+        if found is None:
+            continue
+        page, excerpt = found
+        payload["hits"].append({**citation_for(path, corpus), "page": page, "snippet": excerpt})
     if not payload["hits"] and not payload["errors"]:
         payload["note"] = "No matching PDF text in data/ril_data."
+    _console(
+        "PDF search: "
+        f"{len(payload['hits'])} hit(s), {payload['files_scanned']} file(s), "
+        f"{opened} opened, {payload['files_scanned'] - opened} from stored text, "
+        f"{time.perf_counter() - started:.1f}s"
+    )
     return payload
 
 
@@ -270,34 +426,34 @@ def read_corpus(path: str, *, root: Path, pages: str = "", query: str = "") -> d
     if not terms:
         payload["note"] = "Pass query. Only the matching passage is read."
         return payload
+    started = time.perf_counter()
+    located = citation_for(target, corpus)
+    payload.update(located)
     try:
-        from pypdf import PdfReader
-    except ImportError:
-        payload["note"] = "pypdf is not installed in this Python environment."
-        return payload
-    try:
-        reader = PdfReader(str(target))
-        if getattr(reader, "is_encrypted", False):
-            raise OSError("PDF is encrypted")
-        selected = _parse_pages(pages, len(reader.pages)) if (pages or "").strip() else list(
-            range(1, len(reader.pages) + 1)
-        )
+        if (pages or "").strip():
+            selected = _parse_pages(pages, 100000)
+            for number in selected:
+                text, _opened = _text_on_page(corpus, target, number)
+                excerpt = _excerpt_if_match(text, terms)
+                if not excerpt:
+                    continue
+                payload["pages"].append({"page": number, "text": excerpt})
+                payload["note"] = "Matching passage only. The rest of the file was not returned."
+                _console(f"PDF read: {target.name} page {number} in {time.perf_counter() - started:.1f}s")
+                return payload
+        else:
+            found, _opened = _first_passage(corpus, target, terms)
+            if found is not None:
+                number, excerpt = found
+                payload["pages"].append({"page": number, "text": excerpt})
+                payload["note"] = "Matching passage only. The rest of the file was not returned."
+                _console(f"PDF read: {target.name} page {number} in {time.perf_counter() - started:.1f}s")
+                return payload
     except Exception as exc:
         payload["note"] = f"{target.name}: {exc}"
         return payload
-    located = citation_for(target, corpus)
-    payload.update(located)
-    for number in selected:
-        text = _page_text(reader.pages[number - 1])
-        if not _page_matches(text.casefold(), terms):
-            continue
-        excerpt = _excerpt(text, terms)
-        if not excerpt:
-            continue
-        payload["pages"].append({"page": number, "text": excerpt})
-        payload["note"] = "Matching passage only. The rest of the file was not returned."
-        return payload
     payload["note"] = "No matching passage in that PDF."
+    _console(f"PDF read: {target.name} no match in {time.perf_counter() - started:.1f}s")
     return payload
 
 
@@ -344,8 +500,10 @@ class PdfCorpusShell(ShellTools):
     """Shell tool that only reads PDFs under data/ril_data.
 
     run_shell_command stays on the class and is not offered to the model.
-    search_context and read_context build one argv and execute it with
-    subprocess, which is the same on Linux and Windows.
+    search_context and read_context read PDFs in this process and keep the
+    extracted text, so a later search or read of the same page does not
+    open the file again. The same module is the shell command on Linux
+    and Windows: python -m legal_rag.tools.pdf_shell.
     """
 
     def __init__(self, corpus_dir: Optional[Path] = None, timeout: int = 180, **kwargs):
@@ -401,15 +559,16 @@ class PdfCorpusShell(ShellTools):
         """Context search of PDF text in data/ril_data.
 
         Returns only the matching passage of a file, then stops. The
-        rest of that file is not returned. The command is the current
-        Python interpreter and pypdf, on Linux and on Windows.
+        rest of that file is not returned. Pass folder and filename
+        when they are known so the search does not open every PDF.
+        Extracted pages are kept for the next search and for read_context.
 
         Args:
             query: Words, clause, heading, or party from the current
                 user message. Empty uses that user message.
             folder: Folder under data/ril_data, with forward slashes.
                 Examples: PSC, JOA/New JOA, sites/Regulatory/KGD6.
-                Empty searches the whole ril_data tree.
+                Empty searches the whole ril_data tree and is slow.
             filename: Case-insensitive part of the PDF file name.
                 Empty searches every PDF in folder.
 
@@ -419,12 +578,17 @@ class PdfCorpusShell(ShellTools):
             link rules.
         """
         question = (query or "").strip() or latest_user_text(run_context)
-        args = self._command("search", f"--query={question}")
-        if folder:
-            args.append(f"--folder={folder}")
-        if filename:
-            args.append(f"--filename={filename}")
-        return self._run(args)
+        try:
+            return _dump(
+                search_corpus(
+                    question,
+                    root=self.corpus_dir,
+                    folder=folder,
+                    filename=filename,
+                )
+            )
+        except Exception as exc:
+            return f"Error: {exc}"
 
     def read_context(
         self,
@@ -436,14 +600,15 @@ class PdfCorpusShell(ShellTools):
         """Read the PDF context: the matching passage of one file under data/ril_data.
 
         Stops at the first matching passage. Does not return the rest
-        of the file. The command is the same on Linux and Windows.
+        of the file. Pass pages as the page number from the search hit.
+        That page is reused and the PDF is not opened again.
 
         Args:
             path: PDF path relative to data/ril_data, forward slashes.
                 Example: JOA/New JOA/file.pdf
             query: Text to locate. Empty uses the current user message.
-            pages: Optional 1-based pages to search inside, such as "4"
-                or "4-6". Empty scans until the first match.
+            pages: 1-based page from the search hit, such as "4" or "4-6".
+                Empty continues from stored text until the first match.
 
         Returns:
             JSON with filename, folder_path, and the matching passage.
@@ -451,10 +616,12 @@ class PdfCorpusShell(ShellTools):
         question = (query or "").strip() or latest_user_text(run_context)
         if not (path or "").strip():
             return self.search_context(run_context, query=question)
-        args = self._command("read", f"--path={path}", f"--query={question}")
-        if pages:
-            args.append(f"--pages={pages}")
-        return self._run(args)
+        try:
+            return _dump(
+                read_corpus(path, root=self.corpus_dir, pages=pages, query=question)
+            )
+        except Exception as exc:
+            return f"Error: {exc}"
 
 
 if __name__ == "__main__":

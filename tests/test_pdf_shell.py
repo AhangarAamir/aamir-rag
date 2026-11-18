@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from legal_rag.knowledge.chunking import origin_from_source
+from legal_rag.tools import pdf_shell
 from legal_rag.tools.pdf_shell import (
     PdfCorpusShell,
     citation_for,
@@ -173,6 +174,49 @@ class SearchTests(unittest.TestCase):
             self.assertIn("Article 10.7", opened["pages"][0]["text"])
             self.assertNotIn("UNIQUE_TAIL_MARKER", opened["pages"][0]["text"])
 
+    def test_repeat_search_and_read_reuse_stored_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_pages(
+                root / "PSC" / "participating-interest.pdf",
+                ["Article 10.7 participating interest", "later page"],
+            )
+            write_text_pdf(root / "PSC" / "aaa-other.pdf", "unrelated insurance notice")
+            calls = {"n": 0}
+            original = pdf_shell._page_text
+
+            def counting(page):
+                calls["n"] += 1
+                return original(page)
+
+            with patch("legal_rag.tools.pdf_shell._page_text", counting):
+                pdf_shell._PAGE_MEMORY.clear()
+                found = search_corpus(
+                    "participating interest",
+                    root=root,
+                    folder="PSC",
+                    max_hits=1,
+                )
+                self.assertEqual(found["hits"][0]["filename"], "participating-interest.pdf")
+                self.assertEqual(calls["n"], 1)
+                pdf_shell._PAGE_MEMORY.clear()
+                again = search_corpus(
+                    "participating interest",
+                    root=root,
+                    folder="PSC",
+                    max_hits=1,
+                )
+                opened = read_corpus(
+                    "PSC/participating-interest.pdf",
+                    root=root,
+                    pages="1",
+                    query="Article 10.7",
+                )
+            self.assertEqual(calls["n"], 1)
+            self.assertEqual(again["hits"][0]["page"], 1)
+            self.assertEqual(opened["pages"][0]["page"], 1)
+            self.assertIn("Article 10.7", opened["pages"][0]["text"])
+
     def test_escape_and_missing_folder_do_not_leave_the_corpus(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -212,19 +256,23 @@ class ShellCommandTests(unittest.TestCase):
                 content = "royalty well-head"
 
             context = type("Run", (), {"messages": [_Message()]})()
-            with patch("legal_rag.tools.pdf_shell.subprocess.run", wraps=__import__("subprocess").run) as run:
-                raw = tool.search_context(context, query="", folder="PSC")
-            argv = run.call_args.args[0]
+            argv = tool._command("search", "--query=royalty well-head", "--folder=PSC")
             self.assertEqual(argv[0], sys.executable)
             self.assertEqual(argv[1:3], ["-m", "legal_rag.tools.pdf_shell"])
             self.assertIn("--query=royalty well-head", argv)
             self.assertNotIn("pdftotext", argv)
             self.assertNotIn("grep", argv)
-            self.assertFalse(run.call_args.kwargs.get("shell", False))
-            self.assertEqual(run.call_args.kwargs["cwd"], str(Path(tool.base_dir)))
+            raw = tool.search_context(context, query="", folder="PSC")
             payload = json.loads(raw)
             self.assertEqual(payload["hits"][0]["folder_path"], "PSC")
             self.assertIn("royalty", payload["hits"][0]["snippet"])
+
+            completed = type("Done", (), {"returncode": 0, "stdout": "{}", "stderr": ""})()
+            with patch("legal_rag.tools.pdf_shell.subprocess.run", return_value=completed) as run:
+                tool._run(argv)
+            self.assertFalse(run.call_args.kwargs.get("shell", False))
+            self.assertEqual(run.call_args.kwargs["cwd"], str(Path(tool.base_dir)))
+            self.assertEqual(run.call_args.args[0][0], sys.executable)
 
             refused = tool._run(["pdftotext", "file.pdf"])
             self.assertTrue(refused.startswith("Error:"))

@@ -35,6 +35,7 @@ from legal_rag.knowledge.catalog import (
     identify_collection,
     normalize_family_code,
 )
+from legal_rag.knowledge.paths import sites_relative_folder, strip_workspace_path
 from legal_rag.config import (
     CHUNKER_ASYNC,
     CHUNKER_CONCURRENCY,
@@ -181,36 +182,6 @@ def primary_instrument_key(*names: str) -> str:
 def guess_doc_family(*parts: str) -> str:
     hit = identify_collection(*parts)
     return hit.code if hit else ""
-
-
-# Local workspace dump copied under a family folder. It is not a Document Center path.
-_WORKSPACE_PATH = re.compile(
-    r"aamirWS/data/ril_data/(?:JOA|JAO|PEL|PML|PSC|RSC)/?",
-    re.IGNORECASE,
-)
-
-
-def strip_workspace_path(text: str) -> str:
-    """Drop aamirWS/data/ril_data/<family> so citations stay family/file."""
-    if not text or "aamirws" not in text.lower():
-        return text
-    return _WORKSPACE_PATH.sub("", text)
-
-
-def sites_relative_folder(path: Path) -> Optional[str]:
-    """Parent folders from the ``sites`` segment down.
-
-    Windows separators are accepted. Returns None when the path has no
-    ``sites`` folder, so JOA/PSC paths keep the Document Center rule.
-    """
-    parts = [part for part in str(path).replace("\\", "/").split("/") if part and part not in {".", ".."}]
-    if len(parts) < 2:
-        return None
-    folders = parts[:-1]
-    for index, part in enumerate(folders):
-        if part.lower() == "sites":
-            return "/".join(folders[index:])
-    return None
 
 
 def _relative_folder(path: Path) -> str:

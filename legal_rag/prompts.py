@@ -672,11 +672,13 @@ QUERY_INSTRUCTIONS = dedent(
     - analyze
     - search_knowledge
 
-    search_context and read_context are the retrieval path. Each one runs a
-    shell command: the current Python interpreter, reading PDFs with
-    the PDF library already installed in this environment. The files
-    are under data/ril_data. The same command is used on Linux and
-    Windows. Do not call grep, find, pdftotext, or PowerShell.
+    search_context and read_context are the retrieval path. They read
+    PDFs with the PDF library already installed in this environment.
+    The files are under data/ril_data. The same tools are used on Linux
+    and Windows. Do not call grep, find, pdftotext, or PowerShell.
+    Pass folder and filename on search_context whenever the question
+    names them. Pass the hit's page to read_context. Extracted text is
+    kept, so that read does not open the PDF again.
     search_knowledge stays available with the ingest knowledge base.
     Answer contract questions from the PDF shell hits.
 
@@ -1208,9 +1210,11 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
        Call read_context when a snippet is too short to quote the operative
        wording. Each call returns only the matching passage and then
        stops. Do not ask for the rest of the file. search_context and
-       read_context shell out to the current Python
-       interpreter and read PDFs under data/ril_data with the installed
-       PDF library. Use that command on Linux and on Windows.
+       read_context use the current Python interpreter and read PDFs
+       under data/ril_data with the installed PDF library, on Linux and
+       on Windows. Pass folder and filename so the search opens only
+       that part of the corpus. On read_context, pass the hit path and
+       pages set to the hit's page. That page is already extracted.
        When the current message names an instrument, clause, or file,
        set search_context from THAT message: query for the clause, heading,
        party, or defined term; folder for the directory under
@@ -1272,14 +1276,18 @@ PDF_SHELL_INSTRUCTIONS = dedent(
     """
     PDF shell tool:
 
-    - search_context and read_context are the only shell commands.
-    - They run the current Python interpreter and read PDFs with the
-      PDF library in this environment. Do not build a different command
-      for Linux or Windows.
+    - search_context and read_context are the only PDF commands.
+    - They run in the current Python interpreter and read PDFs with the
+      PDF library in this environment. The same call is used on Linux
+      and Windows. Do not build a grep, find, pdftotext, or PowerShell
+      command.
     - Every PDF is under data/ril_data. folder and path are relative to
-      that directory. Use forward slashes.
+      that directory. Use forward slashes. Set folder and filename on
+      search_context when the question names them.
     - A hit is the matching passage only. The rest of the PDF is not
       returned. Do not ask the tool to read the whole file.
+    - read_context takes the hit path and pages set to the hit's page.
+      Stored text is reused, so that read does not scan the file again.
     - Hits already contain folder_path and filename. Build the existing
       Document Center and sites links from those fields. Do not put
       data/ril_data or a local disk path in a citation.
@@ -1291,7 +1299,8 @@ QUERY_FEW_SHOT = dedent(
     Every Search line is a search_context call. query is the search text.
     folder is the directory under data/ril_data when the question names
     a family. filename is set when the question names a file. Call
-    read_context for a short quote from a hit. Link creation is unchanged:
+    read_context for a short quote from a hit and pass that hit's page.
+    Link creation is unchanged:
     use folder_path and filename from the hit.
 
     Example 0 — greeting, no retrieval
