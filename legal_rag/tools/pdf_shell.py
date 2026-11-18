@@ -31,8 +31,8 @@ from legal_rag.knowledge.paths import sites_relative_folder, strip_workspace_pat
 
 PDF_MODULE = "legal_rag.tools.pdf_shell"
 CORPUS_LABEL = "data/ril_data"
-MAX_SNIPPET = 480
-MAX_READ_PAGES = 6
+MAX_PASSAGE = 12000
+MAX_FOLLOW_PAGES = 5
 MAX_FILES = 2000
 MAX_FILE_BYTES = 80 * 1024 * 1024
 _STOP_WORDS = frozenset(
@@ -120,22 +120,78 @@ def _page_matches(body: str, terms: list[str]) -> bool:
     return any(term in present for term in anchors) and len(present) >= 2
 
 
-def _excerpt(text: str, terms: Iterable[str]) -> str:
-    """The passage around the match. The rest of the page is discarded."""
-    compact = text.replace("\r", "")
-    lowered = compact.casefold()
-    indexes = [lowered.find(term) for term in terms]
+# A new article, clause, or section. Mid-sentence references such as
+# "under Article 10.1(c)" are not headings.
+_HEADING = re.compile(
+    r"(?i)(?:\A|\n|\.\s)[ \t]*((?:article|clause|section)[ \t]+(\d+(?:\.\d+)*))\b"
+)
+
+
+def _anchor_index(text: str, terms: Iterable[str], not_before: int = 0) -> int:
+    """Where the passage belongs. An article number beats an earlier common word."""
+    window = text[not_before:].casefold()
+    numbers = _article_numbers(terms)
+    preferred = list(numbers) or ([max(terms, key=len)] if terms else [])
+    indexes = [window.find(term) for term in preferred]
     indexes = [index for index in indexes if index >= 0]
     if not indexes:
-        return ""
-    index = min(indexes)
-    line_start = compact.rfind("\n", 0, index)
-    start = line_start + 1 if line_start >= 0 and index - line_start <= 180 else max(0, index - 80)
-    paragraph_end = compact.find("\n\n", index)
-    end = paragraph_end if paragraph_end != -1 and paragraph_end <= index + MAX_SNIPPET else index + MAX_SNIPPET
-    end = min(len(compact), end)
-    excerpt = re.sub(r"[ \t]+", " ", compact[start:end]).strip()
-    return excerpt[:MAX_SNIPPET]
+        indexes = [window.find(term) for term in terms if term]
+        indexes = [index for index in indexes if index >= 0]
+    if not indexes:
+        return -1
+    return not_before + min(indexes)
+
+
+def _article_numbers(terms: Iterable[str]) -> set[str]:
+    return {term for term in terms if re.fullmatch(r"\d+\.\d+(?:\.\d+)*", term)}
+
+
+def _clean(excerpt: str) -> str:
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in excerpt.replace("\r", "").split("\n")]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _passage_slice(text: str, terms: list[str], not_before: int = 0) -> tuple[str, bool, bool]:
+    """Article text, whether a later page may belong to it, and whether it was capped.
+
+    The slice starts at the matching article heading and stops before the
+    next article, clause, or section. It also stops at MAX_PASSAGE so the
+    rest of the PDF is not returned. The match itself must fall at or after
+    not_before, so an earlier page cannot steal the hit.
+    """
+    index = _anchor_index(text, terms, not_before)
+    if index < 0:
+        return "", False, False
+    numbers = _article_numbers(terms)
+    start = None
+    fallback = None
+    for match in _HEADING.finditer(text):
+        if match.start(1) > index:
+            break
+        fallback = match.start(1)
+        if not numbers or match.group(2) in numbers:
+            start = match.start(1)
+    if start is None:
+        start = fallback if fallback is not None else max(0, index - 400)
+    end = None
+    for match in _HEADING.finditer(text):
+        if match.start(1) <= start + 8:
+            continue
+        end = match.start(1)
+        break
+    closed = end is not None
+    capped = False
+    if end is None:
+        end = len(text)
+    if end - start > MAX_PASSAGE:
+        end = start + MAX_PASSAGE
+        closed = True
+        capped = True
+    excerpt = _clean(text[start:end])
+    if not excerpt:
+        return "", False, False
+    need_more = end >= len(text) and not closed
+    return excerpt, need_more, capped
 
 
 def _console(message: str) -> None:
@@ -240,52 +296,77 @@ def _open_reader(path: Path):
     return reader
 
 
-def _excerpt_if_match(text: str, terms: list[str]) -> str:
-    if not text or not _page_matches(text.casefold(), terms):
-        return ""
-    return _excerpt(text, terms)
-
-
-def _first_passage(corpus: Path, pdf: Path, terms: list[str]) -> tuple[Optional[tuple[int, str]], bool]:
-    """Return the first matching passage and whether the PDF had to be opened.
-
-    Pages already extracted are reused. Later pages stay unread.
-    """
-    pages, complete = _cached_pages(corpus, pdf)
-    for index, text in enumerate(pages, start=1):
-        excerpt = _excerpt_if_match(text, terms)
-        if excerpt:
-            return (index, excerpt), False
-    if complete:
-        return None, False
-    reader = _open_reader(pdf)
-    total = len(reader.pages)
-    for index in range(len(pages) + 1, total + 1):
-        text = _page_text(reader.pages[index - 1])
-        pages.append(text)
-        excerpt = _excerpt_if_match(text, terms)
-        if excerpt:
-            _store_pages(corpus, pdf, pages, complete=index == total)
-            return (index, excerpt), True
-    _store_pages(corpus, pdf, pages, complete=True)
-    return None, True
-
-
-def _text_on_page(corpus: Path, pdf: Path, number: int) -> tuple[str, bool]:
-    """One stored page. Opens the PDF only when that page is not stored yet."""
-    pages, complete = _cached_pages(corpus, pdf)
-    if 1 <= number <= len(pages):
-        return pages[number - 1], False
-    if complete or number < 1:
-        return "", False
+def _ensure_through(
+    corpus: Path, pdf: Path, pages: list[str], complete: bool, number: int
+) -> tuple[list[str], bool, bool]:
+    """Extend stored pages through `number`. Later pages stay unread."""
+    if number <= len(pages) or complete:
+        return pages, complete, False
     reader = _open_reader(pdf)
     total = len(reader.pages)
     while len(pages) < number and len(pages) < total:
         pages.append(_page_text(reader.pages[len(pages)]))
-    _store_pages(corpus, pdf, pages, complete=len(pages) >= total)
-    if number <= len(pages):
-        return pages[number - 1], True
-    return "", True
+    complete = len(pages) >= total
+    _store_pages(corpus, pdf, pages, complete)
+    return pages, complete, True
+
+
+def _read_passage(
+    corpus: Path, pdf: Path, terms: list[str], start_at: int = 1
+) -> tuple[Optional[tuple[int, int, str, bool]], bool]:
+    """Matching article text, from its heading through the next heading.
+
+    Returns (first page, last page, text, passage_continues) and whether
+    the PDF was opened. Pages after the article stay unread.
+    """
+    pages, complete = _cached_pages(corpus, pdf)
+    opened_any = False
+    number = max(1, start_at)
+    match_page = None
+    while True:
+        pages, complete, opened = _ensure_through(corpus, pdf, pages, complete, number)
+        opened_any = opened_any or opened
+        if number > len(pages):
+            return None, opened_any
+        if _page_matches(pages[number - 1].casefold(), terms):
+            match_page = number
+            break
+        if complete:
+            return None, opened_any
+        number += 1
+
+    first = max(1, match_page - 1)
+    last = match_page
+
+    def _window() -> tuple[str, int]:
+        parts = [pages[item - 1].replace("\r", "") for item in range(first, last + 1)]
+        offset = 0
+        for item, part in enumerate(parts):
+            if first + item == match_page:
+                break
+            offset += len(part) + 1
+        return "\n".join(parts), offset
+
+    text, offset = _window()
+    excerpt, need_more, capped = _passage_slice(text, terms, offset)
+    while need_more and (last - match_page) < MAX_FOLLOW_PAGES:
+        nxt = last + 1
+        pages, complete, opened = _ensure_through(corpus, pdf, pages, complete, nxt)
+        opened_any = opened_any or opened
+        if nxt > len(pages):
+            break
+        last = nxt
+        text, offset = _window()
+        excerpt, need_more, capped = _passage_slice(text, terms, offset)
+    if not excerpt:
+        return None, opened_any
+    through = last
+    if last > first:
+        tail = _clean(pages[last - 1])[:40]
+        if tail and tail not in excerpt:
+            through = last - 1
+    continues = bool(capped or (need_more and not complete))
+    return (match_page, through, excerpt, continues), opened_any
 
 
 def _iter_pdfs(base: Path, filename: str) -> list[Path]:
@@ -315,30 +396,6 @@ def _rank_pdfs(files: list[Path], terms: list[str]) -> list[Path]:
         return (-overlap, name)
 
     return sorted(files, key=rank)
-
-
-def _parse_pages(spec: str, page_count: int) -> list[int]:
-    """1-based page numbers. Empty means the first pages."""
-    raw = (spec or "").strip()
-    if not raw:
-        last = min(page_count, 3)
-        return list(range(1, last + 1))
-    numbers: list[int] = []
-    for piece in raw.split(","):
-        part = piece.strip()
-        if not part:
-            continue
-        if "-" in part:
-            start_text, end_text = part.split("-", 1)
-            start = int(start_text)
-            end = int(end_text)
-            if end < start:
-                start, end = end, start
-            numbers.extend(range(start, end + 1))
-        else:
-            numbers.append(int(part))
-    chosen = [number for number in numbers if 1 <= number <= page_count]
-    return chosen[:MAX_READ_PAGES]
 
 
 def search_corpus(
@@ -385,7 +442,7 @@ def search_corpus(
             break
         payload["files_scanned"] += 1
         try:
-            found, did_open = _first_passage(corpus, path, terms)
+            found, did_open = _read_passage(corpus, path, terms)
         except ImportError:
             payload["note"] = "pypdf is not installed in this Python environment."
             return payload
@@ -397,8 +454,16 @@ def search_corpus(
             opened += 1
         if found is None:
             continue
-        page, excerpt = found
-        payload["hits"].append({**citation_for(path, corpus), "page": page, "snippet": excerpt})
+        page, through, excerpt, continues = found
+        payload["hits"].append(
+            {
+                **citation_for(path, corpus),
+                "page": page,
+                "through_page": through,
+                "passage_continues": continues,
+                "snippet": excerpt,
+            }
+        )
     if not payload["hits"] and not payload["errors"]:
         payload["note"] = "No matching PDF text in data/ril_data."
     _console(
@@ -410,11 +475,24 @@ def search_corpus(
     return payload
 
 
-def read_corpus(path: str, *, root: Path, pages: str = "", query: str = "") -> dict:
-    """Return the matching passage of one PDF and stop.
+def _start_page(spec: str) -> int:
+    raw = (spec or "").strip()
+    if not raw:
+        return 1
+    piece = raw.split(",")[0].strip()
+    if "-" in piece:
+        piece = piece.split("-", 1)[0].strip()
+    try:
+        return max(1, int(piece))
+    except ValueError:
+        return 1
 
-    Pages before the match are checked only to find it. Later pages are
-    not extracted, and the rest of the matching page is not returned.
+
+def read_corpus(path: str, *, root: Path, pages: str = "", query: str = "") -> dict:
+    """Return the matching article and stop before the next one.
+
+    Pages before the match are checked only to find it. Pages after the
+    next article heading are not extracted.
     """
     corpus = root.resolve()
     target = resolve_under(corpus, path)
@@ -430,25 +508,29 @@ def read_corpus(path: str, *, root: Path, pages: str = "", query: str = "") -> d
     located = citation_for(target, corpus)
     payload.update(located)
     try:
-        if (pages or "").strip():
-            selected = _parse_pages(pages, 100000)
-            for number in selected:
-                text, _opened = _text_on_page(corpus, target, number)
-                excerpt = _excerpt_if_match(text, terms)
-                if not excerpt:
-                    continue
-                payload["pages"].append({"page": number, "text": excerpt})
-                payload["note"] = "Matching passage only. The rest of the file was not returned."
-                _console(f"PDF read: {target.name} page {number} in {time.perf_counter() - started:.1f}s")
-                return payload
-        else:
-            found, _opened = _first_passage(corpus, target, terms)
-            if found is not None:
-                number, excerpt = found
-                payload["pages"].append({"page": number, "text": excerpt})
-                payload["note"] = "Matching passage only. The rest of the file was not returned."
-                _console(f"PDF read: {target.name} page {number} in {time.perf_counter() - started:.1f}s")
-                return payload
+        found, _opened = _read_passage(corpus, target, terms, start_at=_start_page(pages))
+        if found is not None:
+            number, through, excerpt, continues = found
+            payload["pages"].append(
+                {
+                    "page": number,
+                    "through_page": through,
+                    "passage_continues": continues,
+                    "text": excerpt,
+                }
+            )
+            if continues:
+                payload["note"] = (
+                    "Article text reached the read limit and continues on the next page."
+                )
+            else:
+                payload["note"] = (
+                    "Article text through the next heading. Later articles were not returned."
+                )
+            _console(
+                f"PDF read: {target.name} pages {number}-{through} in {time.perf_counter() - started:.1f}s"
+            )
+            return payload
     except Exception as exc:
         payload["note"] = f"{target.name}: {exc}"
         return payload
@@ -558,9 +640,10 @@ class PdfCorpusShell(ShellTools):
     ) -> str:
         """Context search of PDF text in data/ril_data.
 
-        Returns only the matching passage of a file, then stops. The
-        rest of that file is not returned. Pass folder and filename
-        when they are known so the search does not open every PDF.
+        Returns the matching article or clause from its heading through
+        the next article heading, including the following pages of that
+        article. Later articles are not returned. Pass folder and
+        filename when they are known so the search does not open every PDF.
         Extracted pages are kept for the next search and for read_context.
 
         Args:
@@ -573,9 +656,10 @@ class PdfCorpusShell(ShellTools):
                 Empty searches every PDF in folder.
 
         Returns:
-            JSON hits with filename, folder_path, page, and a short
-            snippet. Cite folder_path and filename with the existing
-            link rules.
+            JSON hits with filename, folder_path, page, through_page,
+            and the article text. Cite folder_path and filename with
+            the existing link rules. When passage_continues is false,
+            the article text is complete through the next heading.
         """
         question = (query or "").strip() or latest_user_text(run_context)
         try:
@@ -597,18 +681,19 @@ class PdfCorpusShell(ShellTools):
         query: str = "",
         pages: str = "",
     ) -> str:
-        """Read the PDF context: the matching passage of one file under data/ril_data.
+        """Read the matching article from one PDF under data/ril_data.
 
-        Stops at the first matching passage. Does not return the rest
-        of the file. Pass pages as the page number from the search hit.
-        That page is reused and the PDF is not opened again.
+        Starts at the hit page and continues through the next article
+        heading, including the following pages of that article. Later
+        articles are not returned. Pass pages as the page from the hit.
+        Pages already extracted are reused.
 
         Args:
             path: PDF path relative to data/ril_data, forward slashes.
                 Example: JOA/New JOA/file.pdf
             query: Text to locate. Empty uses the current user message.
-            pages: 1-based page from the search hit, such as "4" or "4-6".
-                Empty continues from stored text until the first match.
+            pages: 1-based page from the search hit, such as "35".
+                The read continues past this page until the article ends.
 
         Returns:
             JSON with filename, folder_path, and the matching passage.

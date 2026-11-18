@@ -1207,14 +1207,18 @@ QUERY_TOOL_INSTRUCTIONS = dedent(
 
     2. For every factual contract or document question:
        call think, then search_context at least twice, then analyze.
-       Call read_context when a snippet is too short to quote the operative
-       wording. Each call returns only the matching passage and then
-       stops. Do not ask for the rest of the file. search_context and
-       read_context use the current Python interpreter and read PDFs
-       under data/ril_data with the installed PDF library, on Linux and
-       on Windows. Pass folder and filename so the search opens only
-       that part of the corpus. On read_context, pass the hit path and
-       pages set to the hit's page. That page is already extracted.
+       Each call returns the matching article or clause from its heading
+       through the next article heading, including the later pages of
+       that article, then stops. Later articles are not returned. When
+       passage_continues is true, call read_context with the next page.
+       When passage_continues is false, that article text is complete.
+       Answer from it and do not add a note that the passage was cut off.
+       search_context and read_context use the current Python interpreter
+       and read PDFs under data/ril_data with the installed PDF library,
+       on Linux and on Windows. Pass folder and filename so the search
+       opens only that part of the corpus. On read_context, pass the hit
+       path and pages set to the hit's page. The read keeps going until
+       that article ends. Pages already extracted are reused.
        When the current message names an instrument, clause, or file,
        set search_context from THAT message: query for the clause, heading,
        party, or defined term; folder for the directory under
@@ -1284,10 +1288,15 @@ PDF_SHELL_INSTRUCTIONS = dedent(
     - Every PDF is under data/ril_data. folder and path are relative to
       that directory. Use forward slashes. Set folder and filename on
       search_context when the question names them.
-    - A hit is the matching passage only. The rest of the PDF is not
+    - A hit is the matching article or clause from its heading through
+      the next article, clause, or section heading. It includes the
+      following pages of that article. The rest of the PDF is not
       returned. Do not ask the tool to read the whole file.
-    - read_context takes the hit path and pages set to the hit's page.
-      Stored text is reused, so that read does not scan the file again.
+    - When passage_continues is false, the returned article text is
+      complete. Answer from it. Do not say the passage was cut off.
+    - When passage_continues is true, call read_context with the next
+      page. read_context takes the hit path and the hit's page. Stored
+      text is reused.
     - Hits already contain folder_path and filename. Build the existing
       Document Center and sites links from those fields. Do not put
       data/ril_data or a local disk path in a citation.
@@ -1299,7 +1308,7 @@ QUERY_FEW_SHOT = dedent(
     Every Search line is a search_context call. query is the search text.
     folder is the directory under data/ril_data when the question names
     a family. filename is set when the question names a file. Call
-    read_context for a short quote from a hit and pass that hit's page.
+    read_context when passage_continues is true and pass that hit's page.
     Link creation is unchanged:
     use folder_path and filename from the hit.
 

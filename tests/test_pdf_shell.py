@@ -127,12 +127,16 @@ class SearchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             pdf = root / "PSC" / "KGD6-PSC.pdf"
-            filler = (" Insurance notice boilerplate." * 40) + " UNIQUE_TAIL_MARKER"
+            body = " The Contractor shall notify the Management Committee under Article 10.1(c). " * 12
             write_pages(
                 pdf,
                 [
-                    "Article 10.7 Discovery Area participating interest." + filler,
-                    "PAGE TWO ONLY later article",
+                    "Article 10.6 Earlier clause about something else. "
+                    "Article 10.7 Discovery Area participating interest."
+                    + body
+                    + "END_OF_ARTICLE",
+                    "Article 10.8 Relinquishment of the Development Area. UNIQUE_NEXT_ARTICLE",
+                    "PAGE THREE ONLY",
                 ],
             )
             from legal_rag.tools import pdf_shell
@@ -151,16 +155,20 @@ class SearchTests(unittest.TestCase):
                     folder=r"PSC",
                     filename="KGD6",
                 )
-            self.assertEqual(calls["n"], 1)
+            self.assertEqual(calls["n"], 2)
             self.assertEqual(len(found["hits"]), 1)
             hit = found["hits"][0]
             self.assertEqual(hit["filename"], "KGD6-PSC.pdf")
             self.assertEqual(hit["folder_path"], "PSC")
             self.assertEqual(hit["page"], 1)
+            self.assertEqual(hit["through_page"], 1)
+            self.assertFalse(hit["passage_continues"])
             self.assertIn("participating interest", hit["snippet"])
-            self.assertNotIn("PAGE TWO ONLY", hit["snippet"])
-            self.assertNotIn("UNIQUE_TAIL_MARKER", hit["snippet"])
-            self.assertLess(len(hit["snippet"]), len(filler))
+            self.assertIn("END_OF_ARTICLE", hit["snippet"])
+            self.assertIn("Article 10.1(c)", hit["snippet"])
+            self.assertNotIn("Earlier clause", hit["snippet"])
+            self.assertNotIn("UNIQUE_NEXT_ARTICLE", hit["snippet"])
+            self.assertNotIn("PAGE THREE ONLY", hit["snippet"])
             self.assertNotIn(str(root), json.dumps(found))
 
             opened = read_corpus(
@@ -172,7 +180,8 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(opened["folder_path"], "PSC")
             self.assertEqual(len(opened["pages"]), 1)
             self.assertIn("Article 10.7", opened["pages"][0]["text"])
-            self.assertNotIn("UNIQUE_TAIL_MARKER", opened["pages"][0]["text"])
+            self.assertIn("END_OF_ARTICLE", opened["pages"][0]["text"])
+            self.assertNotIn("UNIQUE_NEXT_ARTICLE", opened["pages"][0]["text"])
 
     def test_repeat_search_and_read_reuse_stored_text(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,7 +207,7 @@ class SearchTests(unittest.TestCase):
                     max_hits=1,
                 )
                 self.assertEqual(found["hits"][0]["filename"], "participating-interest.pdf")
-                self.assertEqual(calls["n"], 1)
+                self.assertEqual(calls["n"], 2)
                 pdf_shell._PAGE_MEMORY.clear()
                 again = search_corpus(
                     "participating interest",
@@ -212,7 +221,7 @@ class SearchTests(unittest.TestCase):
                     pages="1",
                     query="Article 10.7",
                 )
-            self.assertEqual(calls["n"], 1)
+            self.assertEqual(calls["n"], 2)
             self.assertEqual(again["hits"][0]["page"], 1)
             self.assertEqual(opened["pages"][0]["page"], 1)
             self.assertIn("Article 10.7", opened["pages"][0]["text"])
