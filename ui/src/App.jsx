@@ -41,7 +41,7 @@ function stripWorkspacePath(text) {
 
 function normalizeMarkdown(text) {
   if (!text) return text;
-  text = stripWorkspacePath(text);
+  text = stripWorkspacePath(text).replace(/<!--[\s\S]*?-->/g, "").trimEnd();
   return text.replace(/((?:^|\n)(?:\|[^\n]+)+)/g, (block) => {
     if (!/\|[\s:-]+\|/.test(block)) return block;
     if (block.includes("\n|")) return block;
@@ -318,8 +318,10 @@ export default function App() {
             return;
           }
           if (event === "RunCompleted" || event === "RunCancelled") {
+            // The final content carries the verified answer with its References section.
             patchAssistant((msg) => ({
               ...msg,
+              content: typeof data.content === "string" && data.content ? data.content : msg.content,
               streaming: false,
               runId: data.run_id || msg.runId,
             }));

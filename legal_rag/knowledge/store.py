@@ -1,132 +1,34 @@
-"""One shared Knowledge base.
+"""Approved-lessons knowledge for the learning loop.
 
-Ingest agent writes here. Query agent searches it as a tool at runtime
-(KnowledgeTools), not by stuffing chunks into the prompt.
-
-Agno's path ingest uses ReaderFactory, not Knowledge.readers, so custom
-readers are registered in both places.
+The contract corpus is not here: it lives in data/index.db (legal_rag.index).
+Reviewer-approved lessons stay in their own Chroma collection so they never
+mix with contract passages.
 """
 
 from __future__ import annotations
 
 from agno.db.sqlite import SqliteDb
-from agno.knowledge.chunking.document import DocumentChunking
-from agno.knowledge.chunking.recursive import RecursiveChunking
-from agno.knowledge.chunking.strategy import ChunkingStrategy
 from agno.knowledge.embedder.openai import OpenAIEmbedder
 from agno.knowledge.knowledge import Knowledge
-from agno.knowledge.reader.reader_factory import ReaderFactory
 from agno.vectordb.chroma import ChromaDb
 from agno.vectordb.search import SearchType
 
-from legal_rag.config import (
-    CHUNKER_CONCURRENCY,
-    CHUNKING_MAX_SIZE,
-    CHUNKING_STRATEGY,
-    COLLECTION_NAME,
-    DATA_DIR,
-    EMBEDDING_MODEL,
-    VECTOR_DB_DIR,
-    require_api_key,
-)
-from legal_rag.knowledge.import_log import install_per_file_import_logs
-from legal_rag.knowledge.text_encoding import build_encoding_csv_reader, build_encoding_json_reader
-from legal_rag.knowledge.chunking import (
-    LegalAgenticChunking,
-    LocatorChunking,
-    PathAwareExcelReader,
-    PathAwareMarkdownReader,
-    PathAwarePDFReader,
-    PathAwareTextReader,
-)
+from legal_rag.config import DATA_DIR, EMBEDDING_MODEL, OPENAI_API_BASE, OPENAI_API_KEY, require_api_key
+
 LEARNINGS_COLLECTION = "legal_learnings"
 LEARNINGS_VECTOR_DB_DIR = DATA_DIR / "learnings_vectordb"
 
-_knowledge: Knowledge | None = None
 _learnings: Knowledge | None = None
 
 
 def build_embedder() -> OpenAIEmbedder:
-    """Embed in batches of CHUNKER_CONCURRENCY instead of one call per chunk.
-
-    A single file with hundreds of chunks would otherwise open one socket per
-    chunk. Windows select() fails above 512 sockets and kills the server.
-    """
     return OpenAIEmbedder(
         id=EMBEDDING_MODEL,
+        base_url=OPENAI_API_BASE,
+        api_key=OPENAI_API_KEY or None,
         enable_batch=True,
-        batch_size=CHUNKER_CONCURRENCY,
+        batch_size=64,
     )
-
-
-def build_chunking_strategy() -> ChunkingStrategy:
-    if CHUNKING_STRATEGY == "document":
-        return LocatorChunking(DocumentChunking())
-    if CHUNKING_STRATEGY == "recursive":
-        return LocatorChunking(RecursiveChunking(chunk_size=1800, overlap=200))
-    return LegalAgenticChunking(max_chunk_size=CHUNKING_MAX_SIZE)
-
-
-def _attach_readers(knowledge: Knowledge) -> None:
-    strategy = build_chunking_strategy()
-    pdf_reader = PathAwarePDFReader(
-        name="Legal PDF Reader",
-        split_on_pages=False,
-        chunking_strategy=strategy,
-    )
-    markdown_reader = PathAwareMarkdownReader(
-        name="Legal Markdown Reader",
-        chunking_strategy=strategy,
-    )
-    text_reader = PathAwareTextReader(
-        name="Legal Text Reader",
-        chunking_strategy=strategy,
-    )
-    # Spreadsheets keep row chunks. Stamp the same folder/theme metadata as PDFs.
-    excel_reader = PathAwareExcelReader(name="Legal Excel Reader")
-    json_reader = build_encoding_json_reader()
-    csv_reader = build_encoding_csv_reader()
-    if knowledge.readers is None:
-        knowledge.readers = {}
-    knowledge.readers["pdf"] = pdf_reader
-    knowledge.readers["markdown"] = markdown_reader
-    knowledge.readers["text"] = text_reader
-    knowledge.readers["excel"] = excel_reader
-    knowledge.readers["json"] = json_reader
-    # Path ingest uses ReaderFactory.get_reader_for_extension, which caches
-    # a default PDFReader. Replace that cache so ingest_path uses this strategy.
-    ReaderFactory._reader_cache["pdf"] = pdf_reader
-    ReaderFactory._reader_cache["markdown"] = markdown_reader
-    ReaderFactory._reader_cache["text"] = text_reader
-    ReaderFactory._reader_cache["excel"] = excel_reader
-    ReaderFactory._reader_cache["json"] = json_reader
-    if csv_reader is not None:
-        knowledge.readers["csv"] = csv_reader
-        ReaderFactory._reader_cache["csv"] = csv_reader
-
-
-def get_knowledge() -> Knowledge:
-    global _knowledge
-    if _knowledge is not None:
-        return _knowledge
-
-    require_api_key()
-    knowledge = Knowledge(
-        name="Legal contract knowledge",
-        description="PSC, JOA, assignment, notification, and related oil & gas documents.",
-        contents_db=SqliteDb(db_file=str(DATA_DIR / "contents.db")),
-        vector_db=ChromaDb(
-            collection=COLLECTION_NAME,
-            path=str(VECTOR_DB_DIR),
-            persistent_client=True,
-            search_type=SearchType.hybrid,
-            embedder=build_embedder(),
-        ),
-    )
-    _attach_readers(knowledge)
-    install_per_file_import_logs(knowledge)
-    _knowledge = knowledge
-    return knowledge
 
 
 def get_learnings_knowledge() -> Knowledge:

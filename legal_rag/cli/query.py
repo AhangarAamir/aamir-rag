@@ -15,7 +15,7 @@ def main() -> None:
         agent.print_response(" ".join(sys.argv[1:]), stream=True, **session_kw)
         return
 
-    print("Query agent ready. Knowledge is used as a tool (think / search / analyze).")
+    print("Query agent ready. Tools: get_clause / find_definition / search_documents / read_pages / source reads.")
     print(f"Session: {QUERY_SESSION_ID} (summary + last N turns persisted)")
     print("Ctrl-C to exit.\n")
     while True:

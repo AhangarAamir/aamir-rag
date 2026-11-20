@@ -1,5 +1,8 @@
 """AgentOS FastAPI runtime: exposes ingest and query agents, plus the query UI.
 
+The corpus index is data/index.db (legal_rag.index). /files/<path> serves the
+corpus files for References when the Document Center base URLs are empty.
+
 Run: `uv run python agent_os.py`  or  `uv run python main.py os`
 
 Build the UI first: `cd ui && npm install && npm run build`
@@ -16,9 +19,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from legal_rag.config import CORS_ALLOWED_ORIGINS, DATA_DIR, HOST, PORT, require_api_key
+from legal_rag.config import CORPUS_DIR, CORS_ALLOWED_ORIGINS, DATA_DIR, HOST, PORT, require_api_key
 from legal_rag.agents.ingest import build_ingest_agent
-from legal_rag.knowledge.store import get_knowledge
 from legal_rag.learning.api import router as learning_router
 from legal_rag.observability.api import router as observability_router
 from legal_rag.agents.query import build_query_agent
@@ -44,6 +46,16 @@ def _spa_index():
         "then restart AgentOS.</p></body></html>",
         status_code=503,
     )
+
+
+@base_app.get("/files/{path:path}", include_in_schema=False)
+def corpus_file(path: str):
+    corpus = CORPUS_DIR.resolve()
+    target = (corpus / path).resolve()
+    if corpus not in target.parents or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    media = "application/pdf" if target.suffix.lower() == ".pdf" else "text/plain; charset=utf-8"
+    return FileResponse(target, media_type=media, content_disposition_type="inline")
 
 
 @base_app.get("/", include_in_schema=False)
@@ -77,14 +89,12 @@ else:
 
 ingest_agent = build_ingest_agent()
 query_agent = build_query_agent()
-knowledge = get_knowledge()
 
 agent_os = AgentOS(
     id="legal-rag-os",
     name="Legal RAG AgentOS",
-    description="Ingest agent writes contracts; query agent answers from knowledge tools.",
+    description="Ingest agent indexes contracts into data/index.db; query agent researches them with tools.",
     agents=[ingest_agent, query_agent],
-    knowledge=[knowledge],
     db=SqliteDb(id="agentos-db", db_file=str(DATA_DIR / "agentos.db")),
     base_app=base_app,
     on_route_conflict="preserve_base_app",

@@ -80,9 +80,10 @@ def build_prompt(
 def _model_text(prompt: str) -> str:
     require_api_key()
     from agno.models.message import Message
-    from agno.models.openai import OpenAIResponses
 
-    model = OpenAIResponses(id=OPENAI_MODEL)
+    from legal_rag.models import build_chat_model
+
+    model = build_chat_model(OPENAI_MODEL)
     response = model.response(
         messages=[
             Message(role="system", content=EXTRACT_SYSTEM),

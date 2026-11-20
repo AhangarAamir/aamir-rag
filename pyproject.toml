@@ -8,10 +8,17 @@ dependencies = [
     "agno>=3.0.9",
     "chromadb>=1.5.9",
     "fastapi>=0.115.0",
+    "numpy>=2.2",
     "openai>=3.10.0",
     "pypdf>=6.18.0",
     "python-dotenv>=1.2.3",
     "python-multipart>=0.0.18",
     "sqlalchemy>=2.0.52",
     "uvicorn>=0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "fpdf2>=2.9.0",
+    "pytest>=9.2.0",
 ]

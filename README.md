@@ -1,125 +1,114 @@
 # Legal RAG — Agno ingest + query agents
 
-Two agents, one shared knowledge base. Query time uses the knowledge base **as a tool** (`think` → `search_knowledge` → `analyze`), not traditional RAG that dumps chunks into the prompt.
+Two agents over one SQLite index (`data/index.db`). The query agent researches with tools
+(clause lookup, definitions, hybrid search, page reads, live reads of the source file) and every
+answer gets verified citations and a References section with Document Center links.
 
-This is a v1 scaffold. Clause IDs, as-of-date tables, PI ledger, and fiscal calculators are later phases.
+Models are OpenAI only: chat on the Responses API (`OPENAI_MODEL`) and embeddings (`EMBEDDING_MODEL`).
 
 ## Architecture
 
 ```text
-data/incoming/*.pdf
+data/incoming/**/*.pdf|.md|.txt   (CORPUS_DIR)
         │
         ▼
- Ingest Agent
-   tools: KnowledgeManagementTools
-     ingest_path / ingest_url / list_content / ingest_status
+ Ingest pipeline  (main.py ingest, or the Ingest Agent's `ingest` tool)
+   extract (pdftotext / pypdf) → legal structure (Article → clause → definition)
+   → one OpenAI call per document (title, parties, block, date, status)
+   → context headers → OpenAI embeddings → Document Center link
         │
         ▼
- Shared Knowledge
-   Chroma (vectors) + SQLite contents db
-   Path-aware PDF reader + LegalAgenticChunking
-   (inner agent returns clause metadata + running summary)
+ data/index.db
+   documents (with link) · pages · articles · chunks · chunks_fts (BM25)
+   embeddings · meta · feedback
         │
         ▼
  Query Agent
-   tools: KnowledgeTools
-     think / search_knowledge / analyze
+   think · list_documents · search_documents · get_clause · find_definition · read_pages
+   read_source_pages · read_markdown_section · grep_source · search_learnings
         │
         ▼
- Answer + citations from retrieved chunks
+ Answer with [C…] tags → verify post-hook → References (documents.link)
 ```
 
-Ingest agent never answers legal questions. Query agent never writes to the knowledge base.
+`search_documents` fuses BM25, vectors, exact clause numbers, defined terms and phrases with
+reciprocal rank fusion, and expands abbreviations (KG-D6 = KGD6 = KG-DWN-98/3, PSC, JOA, MoPNG …)
+in code. The post-hook (`legal_rag/agents/verify.py`) flags citation tags that were not retrieved
+in that turn and quotes that are not verbatim, then writes References from the index.
 
 ## Setup (uv only)
 
 ```bash
-cd legal_rag_agno
 uv sync
-cp .env.example .env   # set OPENAI_API_KEY
+cp .env.example .env   # set OPENAI_API_KEY, OPENAI_MODEL, EMBEDDING_MODEL
 ```
 
-Put PDFs in `data/incoming/`, using the same families as the old ingest notebook:
-
-```text
-data/incoming/
-  JOA/New JOA/
-  JOA/Old JOA/
-  JAO/NEW JAO/
-  JAO/OLD JAO/
-  PSC/Domestic/
-  PML/
-  RSC, PEL, FDP, DGH, MCM, MOM, QPR, …
-```
+Put files in `data/incoming/` using the Document Center folder tree (JOA/New JOA, PSC/Domestic,
+PML, …, or `sites/Regulatory/...`). The folder path becomes the document's link.
 
 ## Run
 
 ```bash
-# ingest
-uv run python main.py ingest ingest all PDFs in data/incoming
-uv run python ingest_cli.py
-
-# query — knowledge is a tool, not preloaded context
+uv run python main.py ingest                    # index everything under CORPUS_DIR
+uv run python main.py ingest "JOA/New JOA" --force
+uv run python main.py ingest --prune            # also drop rows for deleted files
+uv run python main.py reembed                   # after changing EMBEDDING_MODEL
+uv run python main.py links                     # rebuild documents.link after changing base URLs
+uv run python main.py status
 uv run python main.py query What is the participating interest of RIL?
-uv run python query_cli.py
-
-# AgentOS — both agents over HTTP, plus the query UI
-uv run python main.py os
-# or: uv run python agent_os.py
+uv run python main.py os                        # AgentOS + UI
+uv run pytest                                   # offline tests (no API calls)
 ```
 
-The query UI is a Vite React app. Build it once, then AgentOS serves the files at `/` and `/observability`:
+Each indexed file writes `data/import_logs/<file name>.log`.
+
+The query UI is a Vite React app. Build it once, then AgentOS serves the files at `/`, `/observability` and `/learning`:
 
 ```bash
-cd ui
-npm install
-npm run build
-cd ..
+cd ui && npm install && npm run build && cd ..
 uv run python agent_os.py
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) by default (`HOST` / `PORT` in `.env`). `agent_os.py` and `uv run python main.py os` use the same bind address. The page calls `POST /agents/query-agent/runs` (SSE) and lists this browser's chats via `GET /sessions`. A new chat uses a new `session_id`; a different browser gets a different `user_id` in `localStorage`.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000) (`HOST` / `PORT` in `.env`). The page calls
+`POST /agents/query-agent/runs` (SSE) and lists this browser's chats via `GET /sessions`.
+Corpus files are served at `/files/<path>` (used by References when both link base URLs are empty).
 
-For live React work while AgentOS is running:
-
-```bash
-cd ui && npm run dev
-```
-
-Vite proxies `/agents`, `/sessions`, and `/observability/*` APIs to `http://127.0.0.1:8000`.
-
-The hosted control plane at [os.agno.com](https://os.agno.com) can still connect to the same AgentOS instance. Pick **Ingest Agent** (`ingest-agent`) or **Query Agent** (`query-agent`).
+For live React work while AgentOS is running: `cd ui && npm run dev` (Vite proxies `/agents`,
+`/sessions`, and `/observability/*` to `http://127.0.0.1:8000`).
 
 ```bash
-# example: run query agent via the AgentOS API
 curl -X POST http://127.0.0.1:8000/agents/query-agent/runs \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "message=What is the participating interest of RIL?" \
   -d "stream=false"
 ```
 
+## Document links (`documents.link`)
+
+Built at ingest by `legal_rag.domain.document_link`, with the rules the old query prompt gave the model:
+
+| file under CORPUS_DIR | link |
+|---|---|
+| `JOA/NEW JOA/file.pdf` | `https://enp1.ril.com/sites/Regulatory/Document%20Center/JOA/NEW%20JOA/file.pdf` |
+| `PEL/file.pdf` | `https://enp1.ril.com/sites/Regulatory/Document%20Center/PEL/file.pdf` |
+| `sites/Regulatory/KGD6/.../Document Center/file.pdf` | `https://enp1.ril.com/sites/Regulatory/KGD6/.../Document%20Center/file.pdf` |
+| `RSC/aamirWS/data/ril_data/RSC/file.pdf` | `.../Document%20Center/RSC/file.pdf` (workspace segment removed) |
+
 ## Config (`.env`)
 
 | Variable | Meaning |
 |---|---|
 | `OPENAI_API_KEY` | required |
-| `OPENAI_MODEL` | default `gpt-5.6-luna` |
+| `OPENAI_MODEL` | chat model, default `gpt-5.6-luna` |
+| `OPENAI_REASONING_EFFORT` | optional: none … xhigh |
 | `EMBEDDING_MODEL` | default `text-embedding-3-large` |
-| `CHUNKING_STRATEGY` | `agentic` (default custom legal chunker), `document`, or `recursive` |
-| `CHUNKING_MAX_SIZE` | max characters per chunker window (default `4000`) |
-| `CHUNKER_ASYNC` | `true` (default): recursive split + parallel `agent.arun` labels |
-| `CHUNKER_CONCURRENCY` | chunk labels in flight per document; extra chunks wait for the next batch (default `100`) |
-| `SEARCH_MAX_RESULTS` | hits returned by `search_knowledge` (default `12`) |
-| `HOST` | bind address for AgentOS (default `127.0.0.1`; alias `AGENT_OS_HOST`) |
-| `PORT` | bind port for AgentOS (default `8000`; alias `AGENT_OS_PORT`) |
-| `CORS_ALLOWED_ORIGINS` | comma-separated browser origins (default `https://uracs.enp.ril.com`, `https://uracs.ucg.ril.com`) |
-| `OBS_APP` | app name stored on traces (default `legal-rag`) |
-| `OBS_TRACE_INNER` | `true` to also record chunker / topic-shift runs (default `false`) |
-| `OBS_INPUT_USD_PER_M` | optional USD / 1M input override for `OPENAI_MODEL` |
-| `OBS_CACHED_USD_PER_M` | optional USD / 1M cached-input override |
-| `OBS_OUTPUT_USD_PER_M` | optional USD / 1M output override |
-
-`agentic` uses the custom legal chunker. Default is async: local recursive split, one identity call, then parallel metadata labeling. Set `CHUNKER_ASYNC=false` for the old sequential window walk. Switch to `document` if ingest is still too expensive.
+| `INGEST_MODEL` | model for the per-document profile call (default `OPENAI_MODEL`) |
+| `INGEST_LLM_PROFILE` | `false` = filename / text heuristics only |
+| `CORPUS_DIR` | default `data/incoming` |
+| `DOC_CENTER_BASE_URL`, `SITES_BASE_URL` | link bases; both empty = local `/files/` links |
+| `SEARCH_TOP_K`, `CHUNK_MAX_CHARS`, `NUM_HISTORY_RUNS`, `TOOL_CALL_LIMIT` | retrieval / agent tuning |
+| `HOST`, `PORT`, `CORS_ALLOWED_ORIGINS` | server |
+| `OBS_*` | observability, see below |
 
 ## Observability dashboard
 
@@ -132,31 +121,3 @@ The query UI also has an **Observability** link in the sidebar. The page shows r
 Cost is estimated from token counts × USD / 1M rates. OpenAI does not expose a pricing API (`GET /v1/models` has no prices). At startup the app fetches the [LiteLLM model-price catalog](https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json), caches it under `data/model_prices.json`, and looks up `OPENAI_MODEL`. If that fetch fails it uses the cache, then a small built-in table (including official `gpt-5.6-luna` rates: **$0.20 / $0.02 / $1.20** per 1M). Changing `OPENAI_MODEL` in `.env` picks up the new model's rates on the next start. If a run includes provider `metrics.cost`, that value wins over the table.
 
 The dashboard reads `data/observability.db`. On load it also imports completed runs from `data/sessions.db` (the existing Agno session store), so older chats show up after deploy. Streaming post-hooks fire before Agno sets `COMPLETED`; those runs are stored as success, not as still running.
-
-## What each agent does
-
-**Ingest**
-
-1. User points at a file, folder, or `data/incoming`.
-2. Agent calls `ingest_path`.
-3. PDF reader stamps folder/filename, then LegalAgenticChunking (or the strategy in `.env`).
-4. Each chunk stores instrument, family, article, clause, and a locator prefix.
-   Vectors land in Chroma. Content rows land in `data/contents.db`.
-
-**Query**
-
-1. User asks a legal question.
-2. Agent calls `think` to plan searches.
-3. Agent calls `search_knowledge` (can repeat).
-4. Agent calls `analyze` to check if evidence is enough.
-5. Agent answers only from those hits.
-
-## Later (not in v1)
-
-- Stable `clause_id` / heading index
-- `effective_from` / `effective_to` filters
-- Participating interest SQL ledger
-- Fiscal slab lookup and deadline calculator
-- Citation verifier and conflict detector
-
-Those need structured stores and extra tools. This folder is the two-agent control plane they plug into.

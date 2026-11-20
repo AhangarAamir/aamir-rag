@@ -1,4 +1,4 @@
-"""Project entry: `uv run python main.py ingest` or `uv run python main.py query`."""
+"""Project entry: `uv run python main.py <command>`."""
 
 from __future__ import annotations
 
@@ -10,10 +10,27 @@ def main() -> None:
     rest = sys.argv[2:]
 
     if mode in {"ingest", "in"}:
-        from legal_rag.cli.ingest import main as ingest_main
+        from legal_rag.cli.ingest import ingest_main
 
-        sys.argv = [sys.argv[0], *rest]
-        ingest_main()
+        ingest_main(rest)
+        return
+
+    if mode == "reembed":
+        from legal_rag.cli.ingest import reembed_main
+
+        reembed_main(rest)
+        return
+
+    if mode == "links":
+        from legal_rag.cli.ingest import links_main
+
+        links_main(rest)
+        return
+
+    if mode == "status":
+        from legal_rag.cli.ingest import status_main
+
+        status_main(rest)
         return
 
     if mode in {"query", "ask", "q"}:
@@ -31,12 +48,12 @@ def main() -> None:
         return
 
     print("Legal RAG (Agno)")
-    print("  uv run python main.py ingest [message]")
+    print("  uv run python main.py ingest [path] [--force] [--no-llm] [--prune] [--workers N]")
+    print("  uv run python main.py reembed [--workers N]")
+    print("  uv run python main.py links")
+    print("  uv run python main.py status")
     print("  uv run python main.py query [question]")
     print("  uv run python main.py os")
-    print("  uv run python ingest_cli.py")
-    print("  uv run python query_cli.py")
-    print("  uv run python agent_os.py")
     sys.exit(1)
 
 
