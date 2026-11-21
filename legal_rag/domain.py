@@ -245,17 +245,59 @@ def document_link(rel_path: str) -> str:
     return local_url(rel_path)
 
 
-def citation_url(rel_path: str, page: Optional[int] = None) -> str:
-    """Link for a cited passage: the document link; a local link gets the page anchor."""
-    link = document_link(rel_path)
-    if page and link.startswith("/files/"):
-        return f"{link}#page={page}"
-    return link
+def citation_url(rel_path: str, page: Optional[int] = None, text: str = "") -> str:
+    """Document link that opens at `page` and searches for `text` (see page_link)."""
+    return page_link(document_link(rel_path), page, text)
 
 
 def local_url(rel_path: str, page: Optional[int] = None) -> str:
-    url = "/files/" + _encode(rel_path.replace("\\", "/"))
-    return f"{url}#page={page}" if page else url
+    return page_link("/files/" + _encode(rel_path.replace("\\", "/")), page)
+
+
+_SNIPPET_WORDS = 8
+
+
+def search_snippet(text: str, words: int = _SNIPPET_WORDS) -> str:
+    """First few words of a passage, cleaned for a PDF viewer's text search.
+
+    Short on purpose: a long phrase is more likely to cross a line break or a
+    hyphenation the viewer reads differently, and then nothing is found.
+    """
+    # Words are kept as printed ("(200)", "10.7", "per cent."): the viewer searches the
+    # PDF's own text. Only quote marks, markdown emphasis and [C…] tags are dropped.
+    cleaned = re.sub(r"\[\s*C\d+[^\]]*\]", " ", text or "")
+    cleaned = re.sub(r"[“”\"*]", " ", cleaned)
+    tokens = [t for t in cleaned.split() if not re.fullmatch(r"[\W_]+", t)]
+    picked: list[str] = []
+    for token in tokens:
+        # A word split by end-of-line hyphenation would not match the rendered text.
+        if token.endswith("-") and len(token) > 1:
+            break
+        picked.append(token)
+        if len(picked) >= words:
+            break
+    if picked:
+        picked[-1] = picked[-1].rstrip(",;:")
+    return " ".join(picked).strip()
+
+
+def page_link(link: str, page: Optional[int] = None, text: str = "") -> str:
+    """Add PDF open parameters to a document link.
+
+    #page=N              opens the page: Chrome, Edge, Firefox, Acrobat
+    &search=...&phrase=  finds and highlights the words: Firefox (PDF.js), Acrobat;
+                         other viewers ignore it and still open the page
+    Any fragment already on the link is replaced.
+    """
+    base = (link or "").split("#", 1)[0]
+    params: list[str] = []
+    if page:
+        params.append(f"page={int(page)}")
+    snippet = search_snippet(text) if text else ""
+    if snippet:
+        params.append("search=" + quote(snippet, safe=""))
+        params.append("phrase=true")
+    return base + ("#" + "&".join(params) if params else "")
 
 
 def squash(text: str) -> str:

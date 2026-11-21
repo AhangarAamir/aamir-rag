@@ -29,6 +29,7 @@ from legal_rag.domain import (
     fix_typos,
     identifier_keys,
     local_url,
+    page_link,
     squash,
 )
 from legal_rag.index import store
@@ -189,7 +190,7 @@ def _hit(row: Any, score: float = 0.0, matched: Sequence[str] = ()) -> dict[str,
         "context": row["context"],
         "text": row["text"],
         "link": row["link"] or citation_url(rel),
-        "url": row["link"] or citation_url(rel, int(row["page_start"])),
+        "url": page_link(row["link"] or citation_url(rel), int(row["page_start"])),
         "local_url": local_url(rel, int(row["page_start"])),
         "score": round(score, 5),
         "matched": list(matched),

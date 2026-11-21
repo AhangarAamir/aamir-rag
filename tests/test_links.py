@@ -4,7 +4,7 @@ import pytest
 
 import sqlite3
 
-from legal_rag.domain import citation_path, citation_url, document_link
+from legal_rag.domain import citation_path, citation_url, document_link, page_link, search_snippet
 
 DC = "https://enp1.ril.com/sites/Regulatory/Document%20Center/"
 
@@ -59,7 +59,8 @@ def test_search_hits_and_references_use_the_stored_link(indexed_corpus):
 
     hit = engine.search("participating interest", top_k=1)["hits"][0]
     doc = store.get_document(hit["doc_id"])
-    assert hit["url"] == doc["link"] == hit["link"]
+    assert hit["link"] == doc["link"]
+    assert hit["url"] == f"{doc['link']}#page={hit['page_start']}"
 
 
 def test_old_index_gets_link_column(tmp_path):
@@ -79,3 +80,19 @@ def test_old_index_gets_link_column(tmp_path):
         assert store.query("SELECT link FROM documents")[0]["link"] == DC + "JOA/NEW%20JOA/a%20b.pdf"
     finally:
         store.configure(previous)
+
+
+def test_page_link_opens_the_page_and_searches_the_text():
+    link = DC + "JOA/NEW%20JOA/a.pdf"
+    assert page_link(link, 12) == link + "#page=12"
+    assert page_link(link + "#page=3", 7, "two hundred (200) days from the date of such declaration") == (
+        link + "#page=7&search=two%20hundred%20%28200%29%20days%20from%20the%20date%20of&phrase=true"
+    )
+    assert page_link("/files/a.pdf", None) == "/files/a.pdf"
+
+
+def test_search_snippet_keeps_printed_words():
+    assert search_snippet("“10.7 Development Plan.” The Contractor shall submit [C12]") == (
+        "10.7 Development Plan. The Contractor shall submit"
+    )
+    assert search_snippet("Block KG-DWN-98_3 per cent. of the devel-") == "Block KG-DWN-98_3 per cent. of the"

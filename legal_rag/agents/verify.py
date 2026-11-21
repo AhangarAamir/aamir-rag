@@ -4,7 +4,10 @@ Checks, using only what tools returned in this run:
   - every cited tag was actually retrieved (a tag the model made up is flagged)
   - every quotation of 25+ characters appears verbatim in a cited/retrieved passage
   - a researched answer that cites nothing is flagged
-Links come from the index, never from the model.
+Links come from the index, never from the model. Each reference opens the
+document at the page of the cited text and searches for that text: the quote
+the answer took from the passage, or else the passage's first line on each
+page it spans. One document can therefore have several references.
 """
 
 from __future__ import annotations
@@ -14,6 +17,8 @@ from typing import Any, Optional
 
 from agno.run.agent import RunOutput
 
+from legal_rag.domain import page_link, search_snippet
+from legal_rag.index import store
 from legal_rag.index.search import get_chunks
 
 # Tags in another letter ("[B35]", "[S2]") are model inventions.
@@ -80,10 +85,6 @@ def _strip_reference_section(text: str) -> str:
     return text
 
 
-def _pages(hit: dict[str, Any]) -> str:
-    return f"p. {hit['page_start']}" if hit["page_start"] == hit["page_end"] else f"pp. {hit['page_start']}–{hit['page_end']}"
-
-
 def _where(hit: dict[str, Any]) -> str:
     if hit["kind"] == "definition" and hit["defined_term"]:
         return f"definition “{hit['defined_term']}”"
@@ -94,15 +95,110 @@ def _where(hit: dict[str, Any]) -> str:
     return hit["kind"]
 
 
-def build_references(hits: list[dict[str, Any]]) -> str:
+# --------------------------------------------------------------- references
+
+_MIN_LINE = 20
+
+
+def _page_texts(hit: dict[str, Any]) -> dict[int, str]:
+    rows = store.query(
+        "SELECT page_no, text FROM pages WHERE doc_id=? AND page_no BETWEEN ? AND ? ORDER BY page_no",
+        (hit["doc_id"], hit["page_start"], hit["page_end"]),
+    )
+    return {int(r["page_no"]): r["text"] for r in rows}
+
+
+def quotes_by_tag(body: str) -> dict[int, list[str]]:
+    """Quotes in the answer, keyed by the [C…] tags that follow them in the same line."""
+    found: dict[int, list[str]] = {}
+    for match in _QUOTE_RE.finditer(body):
+        tail = body[match.end():match.end() + 400].split("\n", 1)[0]
+        tag = TAG_RE.search(tail)
+        if not tag:
+            continue
+        # Only the tag that closes this quote's sentence, not one after a later quote.
+        if _QUOTE_RE.search(tail[:tag.start()]):
+            continue
+        for num in re.findall(r"\d+", tag.group(0)):
+            found.setdefault(int(num), []).append(match.group(1))
+    return found
+
+
+def _quote_target(quote: str, hit: dict[str, Any], pages: dict[int, str]) -> Optional[tuple[int, str]]:
+    """(page, search text) for a quote that really comes from this passage."""
+    pieces = [p for p in re.split(r"\.{3,}|…|\[[^\]]*\]", quote.replace("**", "")) if len(_norm(p)) >= 12]
+    if not pieces or _norm(pieces[0]) not in _norm(hit["text"]):
+        return None
+    piece = pieces[0]
+    for page_no, text in pages.items():
+        if _norm(piece) in _norm(text):
+            return page_no, piece
+    # Quote runs across a page break: open the page where its first words are.
+    words = search_snippet(piece, 4)
+    for page_no, text in pages.items():
+        if words and _norm(words) in _norm(text):
+            return page_no, words
+    return hit["page_start"], piece
+
+
+def _first_line_on_page(hit_norm: str, page_text: str) -> str:
+    """First line of the page that belongs to this passage."""
+    for line in page_text.split("\n"):
+        line = line.strip()
+        norm = _norm(line)
+        if len(norm) >= _MIN_LINE and norm in hit_norm:
+            return line
+    return ""
+
+
+def reference_targets(hit: dict[str, Any], quotes: list[str]) -> list[dict[str, Any]]:
+    """Where a cited passage should open: one target per page (or per quote)."""
+    pages = _page_texts(hit)
+    targets: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+
+    def add(page_no: int, text: str, continued: bool) -> None:
+        snippet = search_snippet(text)
+        key = (page_no, _norm(snippet))
+        if key in seen:
+            return
+        seen.add(key)
+        targets.append({"page": page_no, "snippet": snippet, "continued": continued})
+
+    for quote in quotes:
+        target = _quote_target(quote, hit, pages)
+        if target:
+            add(target[0], target[1], target[0] != hit["page_start"])
+    if targets:
+        return sorted(targets, key=lambda t: t["page"])
+
+    hit_norm = _norm(hit["text"])
+    for page_no in range(hit["page_start"], hit["page_end"] + 1):
+        line = _first_line_on_page(hit_norm, pages.get(page_no, ""))
+        if line or page_no == hit["page_start"]:
+            add(page_no, line, page_no != hit["page_start"])
+    return targets
+
+
+def build_references(hits: list[dict[str, Any]], quotes: Optional[dict[int, list[str]]] = None) -> str:
+    """One line per cited passage and page, grouped by document in citation order."""
+    quotes = quotes or {}
     by_doc: dict[int, list[dict[str, Any]]] = {}
     for hit in hits:
         by_doc.setdefault(hit["doc_id"], []).append(hit)
     lines = ["## References", ""]
     for doc_hits in by_doc.values():
-        first = doc_hits[0]
-        spots = "; ".join(f"{_where(h)}, {_pages(h)} [C{h['id']}]" for h in doc_hits)
-        lines.append(f"- [{first['cite_path']}]({first['url']}) — {first['document']}: {spots}")
+        rows = []
+        for hit in doc_hits:
+            for target in reference_targets(hit, quotes.get(hit["id"], [])):
+                rows.append((target["page"], hit, target))
+        rows.sort(key=lambda r: (r[0], r[1]["id"]))
+        for page_no, hit, target in rows:
+            url = page_link(hit["link"], page_no, target["snippet"])
+            where = _where(hit) + (" (continued)" if target["continued"] else "")
+            label = f"{hit['cite_path']}, p. {page_no}"
+            text = f" — “{target['snippet']}…”" if target["snippet"] else ""
+            lines.append(f"- [{label}]({url}) — {hit['document']}: {where}{text} [C{hit['id']}]")
     return "\n".join(lines)
 
 
@@ -155,7 +251,7 @@ def verify_answer(text: str, run_output: Optional[RunOutput]) -> tuple[str, dict
 
     parts = [body]
     if hits:
-        parts.append(build_references(hits))
+        parts.append(build_references(hits, quotes_by_tag(body)))
     if notes:
         parts.append("> **Verification:** " + " ".join(notes))
     parts.append(VERIFY_MARK)

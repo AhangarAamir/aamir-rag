@@ -31,6 +31,8 @@ def test_clause_number_ranks_first(indexed_corpus):
 
 def test_citation_links(indexed_corpus):
     hit = engine.get_clause("10.7", "KGD6 PSC")["chunks"][0]
-    assert hit["url"] == "https://enp1.ril.com/sites/Regulatory/Document%20Center/PSC/Domestic/KG-DWN-98_3%20PSC.pdf"
+    link = "https://enp1.ril.com/sites/Regulatory/Document%20Center/PSC/Domestic/KG-DWN-98_3%20PSC.pdf"
+    assert hit["link"] == link
+    assert hit["url"] == f"{link}#page={hit['page_start']}"
     assert hit["cite_path"] == "PSC/Domestic/KG-DWN-98_3 PSC.pdf"
     assert hit["local_url"].startswith("/files/PSC/Domestic/KG-DWN-98_3%20PSC.pdf#page=")
